@@ -1,0 +1,266 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish_to_testpypi:
+        description: 'Zbuduj i wypchnij na TestPyPI (bez publikacji na PyPI)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Wersja i changelog
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Wersja pakietu, zgodnosc z tagiem i sekcja CHANGELOG
+        id: meta
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          source = pathlib.Path("dpay/version.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', source)
+          if match is None:
+              sys.exit("::error::Nie udalo sie odczytac __version__ z dpay/version.py")
+          version = match.group(1)
+          print(f"dpay/version.py -> {version}")
+
+          if os.environ["REF_TYPE"] == "tag":
+              tag = os.environ["REF_NAME"]
+              if tag.removeprefix("v") != version:
+                  sys.exit(f"::error::Tag {tag} nie zgadza sie z __version__={version}")
+              print(f"tag {tag} zgodny z wersja pakietu")
+          else:
+              print("Uruchomienie reczne - pomijam porownanie z tagiem")
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if f"## [{version}]" not in changelog:
+              sys.exit(f"::error file=CHANGELOG.md::Brak sekcji '## [{version}]' w CHANGELOG.md")
+          print("CHANGELOG zawiera sekcje dla tej wersji")
+
+          prerelease = re.search(r"(a|b|rc)\d+$|\.dev\d+$|\.post\d+$", version) is not None
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"version={version}\n")
+              handle.write(f"prerelease={str(prerelease).lower()}\n")
+          print(f"prerelease={prerelease}")
+          PY
+
+  tests:
+    name: Testy (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --all-extras
+      - run: uv run pytest
+
+  quality:
+    name: Ruff i mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    needs: [verify]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - run: uv build --sdist --wheel --out-dir dist
+
+      - run: uvx twine check --strict dist/*
+
+      - name: Artefakty musza odpowiadac wersji ${{ needs.verify.outputs.version }}
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          test -f "dist/dpay_python_sdk-${VERSION}.tar.gz"
+          test -f "dist/dpay_python_sdk-${VERSION}-py3-none-any.whl"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: Smoke test wheela (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    needs: [verify, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Wheel musi dzialac bez zaleznosci runtime
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          uv venv
+          uv pip install --python .venv/bin/python "dist/dpay_python_sdk-${VERSION}-py3-none-any.whl"
+          .venv/bin/python - <<'PY'
+          import os
+
+          from dpay import DPayClient
+          from dpay.testing import MockHttpClient
+          from dpay.version import __version__
+
+          assert __version__ == os.environ["VERSION"], __version__
+
+          transport = MockHttpClient()
+          transport.queue_json(200, {"transaction": {"id": "tx-1", "status": "paid"}})
+          client = DPayClient(service="s", secret_hash="h", http_client=transport)
+          assert client.payments.details("tx-1").is_paid
+
+          print(f"OK: wheel {__version__} dziala bez zaleznosci runtime")
+          PY
+
+  testpypi:
+    name: Publikacja na TestPyPI
+    runs-on: ubuntu-latest
+    needs: [verify, tests, quality, build, smoke]
+    if: github.event_name == 'push' || inputs.publish_to_testpypi
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dpay-python-sdk
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          print-hash: true
+
+  pypi:
+    name: Publikacja na PyPI
+    runs-on: ubuntu-latest
+    needs: [verify, tests, quality, build, smoke, testpypi]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dpay-python-sdk
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
+
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, pypi]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Wytnij sekcje CHANGELOG dla ${{ needs.verify.outputs.version }}
+        id: notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[Unreleased\]:|\Z)",
+              re.M | re.S,
+          )
+          match = pattern.search(text)
+          notes = match.group(1).strip() if match else ""
+          pathlib.Path("release-notes.md").write_text(notes, encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"have_notes={'true' if notes else 'false'}\n")
+          PY
+          cat release-notes.md
+
+      - name: Utworz wydanie i dolacz artefakty
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          HAVE_NOTES: ${{ steps.notes.outputs.have_notes }}
+        run: |
+          set -euo pipefail
+          args=(--title "${GITHUB_REF_NAME}" --verify-tag)
+          if [ "$HAVE_NOTES" = "true" ]; then
+            args+=(--notes-file release-notes.md)
+          else
+            args+=(--generate-notes)
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"

@@ -1,0 +1,99 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dpay-python-sdk"
+dynamic = ["version"]
+description = "Official dpay.pl Python SDK"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+keywords = [
+    "dpay",
+    "dpay.pl",
+    "payments",
+    "platnosci",
+    "payment-gateway",
+    "psp",
+    "blik",
+    "cards",
+    "payouts",
+    "ipn",
+    "sdk",
+]
+authors = [{ name = "dpay", email = "kontakt@dpay.pl" }]
+dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Natural Language :: Polish",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://dpay.pl"
+Documentation = "https://docs.dpay.pl"
+Source = "https://github.com/dpayglobal/dpay-python-sdk"
+Changelog = "https://github.com/dpayglobal/dpay-python-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dpayglobal/dpay-python-sdk/issues"
+
+[project.optional-dependencies]
+async = ["httpx>=0.24"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.11",
+    "ruff>=0.6",
+    "httpx>=0.24",
+]
+
+[tool.hatch.version]
+path = "dpay/version.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/dpay", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+exclude = ["/.gitignore", "/.gitattributes", "/.github"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["dpay"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["dpay", "tests"]
+
+[[tool.mypy.overrides]]
+module = "httpx.*"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
