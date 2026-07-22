@@ -182,9 +182,9 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
-          uv venv
-          uv pip install --python .venv/bin/python "dist/dpay_python_sdk-${VERSION}-py3-none-any.whl"
-          .venv/bin/python - <<'PY'
+          uv run --no-project --isolated \
+            --with "dist/dpay_python_sdk-${VERSION}-py3-none-any.whl" python - <<'PY'
+          import importlib.util
           import os
 
           from dpay import DPayClient
@@ -197,6 +197,8 @@ jobs:
           transport.queue_json(200, {"transaction": {"id": "tx-1", "status": "paid"}})
           client = DPayClient(service="s", secret_hash="h", http_client=transport)
           assert client.payments.details("tx-1").is_paid
+
+          assert importlib.util.find_spec("httpx") is None, "httpx must not be pulled in by default"
 
           print(f"OK: wheel {__version__} dziala bez zaleznosci runtime")
           PY

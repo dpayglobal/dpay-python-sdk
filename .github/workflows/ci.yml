@@ -29,17 +29,21 @@ jobs:
           python-version: '3.10'
       - name: Sync client must work with no dependencies installed
         run: |
-          uv venv
-          uv pip install .
-          uv run --no-project python -c "
+          uv run --no-project --isolated --with . python - <<'PY'
+          import importlib.util
+
           from dpay import DPayClient
           from dpay.testing import MockHttpClient
+
           transport = MockHttpClient()
-          transport.queue_json(200, {'transaction': {'id': 'tx-1', 'status': 'paid'}})
-          client = DPayClient(service='s', secret_hash='h', http_client=transport)
-          assert client.payments.details('tx-1').is_paid
-          print('OK: zero runtime dependencies')
-          "
+          transport.queue_json(200, {"transaction": {"id": "tx-1", "status": "paid"}})
+          client = DPayClient(service="s", secret_hash="h", http_client=transport)
+          assert client.payments.details("tx-1").is_paid
+
+          assert importlib.util.find_spec("httpx") is None, "httpx must not be pulled in by default"
+
+          print("OK: zero runtime dependencies")
+          PY
 
   quality:
     runs-on: ubuntu-latest
