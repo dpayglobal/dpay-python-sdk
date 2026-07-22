@@ -4,11 +4,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      publish_to_testpypi:
-        description: 'Zbuduj i wypchnij na TestPyPI (bez publikacji na PyPI)'
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -117,6 +112,47 @@ jobs:
           test -f "dist/dpay_python_sdk-${VERSION}.tar.gz"
           test -f "dist/dpay_python_sdk-${VERSION}-py3-none-any.whl"
 
+      - name: Zawartosc i metadane wheela
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          import zipfile
+
+          wheel = f"dist/dpay_python_sdk-{os.environ['VERSION']}-py3-none-any.whl"
+          archive = zipfile.ZipFile(wheel)
+          names = archive.namelist()
+
+          problems = []
+          if "dpay/py.typed" not in names:
+              problems.append("brak dpay/py.typed - typowanie nie dotrze do integratorow")
+          if any(name.startswith("tests/") for name in names):
+              problems.append("wheel zawiera katalog tests/")
+          if any(name.endswith(".pyc") for name in names):
+              problems.append("wheel zawiera pliki .pyc")
+
+          metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+          metadata = archive.read(metadata_name).decode("utf-8")
+          headers, _, description = metadata.partition("\n\n")
+
+          print(f"=== {wheel} ({len(names)} plikow) ===")
+          for line in headers.splitlines():
+              if line.startswith(("Name:", "Version:", "License", "Requires-Python:", "Project-URL:", "Requires-Dist:", "Provides-Extra:")):
+                  print(f"  {line}")
+          print(f"  Classifier: {sum(1 for l in headers.splitlines() if l.startswith('Classifier:'))} pozycji")
+          print(f"  Opis: {len(description)} znakow")
+          print("=== pierwsze linie opisu (dokladnie to zobaczy PyPI) ===")
+          print("\n".join(description.splitlines()[:12]))
+
+          if not description.strip():
+              problems.append("pusty long_description - strona na PyPI bylaby pusta")
+          if problems:
+              sys.exit("::error::" + "; ".join(problems))
+          print("\nOK: zawartosc wheela poprawna")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -165,32 +201,10 @@ jobs:
           print(f"OK: wheel {__version__} dziala bez zaleznosci runtime")
           PY
 
-  testpypi:
-    name: Publikacja na TestPyPI
-    runs-on: ubuntu-latest
-    needs: [verify, tests, quality, build, smoke]
-    if: github.event_name == 'push' || inputs.publish_to_testpypi
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/dpay-python-sdk
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-          print-hash: true
-
   pypi:
     name: Publikacja na PyPI
     runs-on: ubuntu-latest
-    needs: [verify, tests, quality, build, smoke, testpypi]
+    needs: [verify, tests, quality, build, smoke]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     environment:
       name: pypi
