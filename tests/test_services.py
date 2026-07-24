@@ -326,10 +326,10 @@ def test_card_path_encodes_transaction_id(client: DPayClient, transport: MockHtt
     assert transport.last_request.url.endswith("/cards/payment/tx%201%2F2/pay/card-otp")
 
 
-def test_card_capture_amount_is_optional(client: DPayClient, transport: MockHttpClient) -> None:
+def test_card_capture_sends_amount(client: DPayClient, transport: MockHttpClient) -> None:
     transport.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
-    client.cards.capture("tx-1")
-    assert transport.last_request.body == "{}"
+    client.cards.capture("tx-1", Money.pln(2999))
+    assert transport.last_request_body == {"amount": 29.99}
 
 
 def test_card_business_failure_raises(client: DPayClient, transport: MockHttpClient) -> None:

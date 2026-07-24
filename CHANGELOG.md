@@ -6,6 +6,14 @@ wersjonowanie zgodne z [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-23
+
+### Fixed
+
+- `cards.capture()` ponownie wymaga kwoty. W 0.1.0 argument był opcjonalny w oparciu
+  o błędny odczyt kontraktu OpenAPI - kwota jest w tym endpoincie wymagana, a wywołanie
+  bez niej wysyłało puste body odrzucane przez API. Sygnatura wraca do zgodności z SDK PHP.
+
 ## [0.1.0] - 2026-07-22
 
 Pierwsze wydanie. Port SDK PHP `dpayglobal/dpay-php-sdk` z zachowaniem parytetu
@@ -33,7 +41,6 @@ testem na produkcyjnym API.
 
 Świadome różnice wobec SDK PHP:
 
-- `cards.capture()` przyjmuje opcjonalną kwotę, zgodnie z kontraktem OpenAPI
 - modele odpowiedzi wystawiają właściwości zamiast metod `get*()`
 - `PermissionException` odpowiada `AccessDeniedError`, bo `PermissionError`
   koliduje z wbudowanym wyjątkiem Pythona
@@ -49,5 +56,6 @@ poziomu. Zachowaliśmy krótki import dla spójności z SDK PHP i lepszego DX -
 tamten pakiet wymaga zależności ze składnią Pythona 2 i nie da się go zaimportować
 na Pythonie 3.10+, więc realne ryzyko współistnienia jest znikome.
 
-[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dpayglobal/dpay-python-sdk/releases/tag/v0.1.0

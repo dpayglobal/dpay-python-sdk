@@ -41,9 +41,8 @@ def pre_auth(transaction_id: str, request: CardPaymentRequest) -> Operation:
     return _payment(transaction_id, "/pay/card-pre-auth", request.to_api())
 
 
-def capture(transaction_id: str, amount: Money | None) -> Operation:
-    body: dict[str, Any] = {} if amount is None else {"amount": float(amount.to_decimal())}
-    return _payment(transaction_id, "/capture", body)
+def capture(transaction_id: str, amount: Money) -> Operation:
+    return _payment(transaction_id, "/capture", {"amount": float(amount.to_decimal())})
 
 
 def cancel(transaction_id: str, amount: Money | None) -> Operation:

@@ -22,7 +22,7 @@ class CardService:
     def pre_auth(self, transaction_id: str, request: CardPaymentRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, self._api.execute(ops.pre_auth(transaction_id, request)))
 
-    def capture(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
+    def capture(self, transaction_id: str, amount: Money) -> CardPaymentResult:
         return cast(CardPaymentResult, self._api.execute(ops.capture(transaction_id, amount)))
 
     def cancel(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
@@ -48,7 +48,7 @@ class AsyncCardService:
     async def pre_auth(self, transaction_id: str, request: CardPaymentRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, await self._api.execute(ops.pre_auth(transaction_id, request)))
 
-    async def capture(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
+    async def capture(self, transaction_id: str, amount: Money) -> CardPaymentResult:
         return cast(CardPaymentResult, await self._api.execute(ops.capture(transaction_id, amount)))
 
     async def cancel(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
