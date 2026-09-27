@@ -13,8 +13,10 @@ from dpay.http.base import AsyncHttpClient
 from dpay.http.httpx_client import HttpxAsyncHttpClient
 from dpay.payment.service import AsyncPaymentService
 from dpay.payout.service import AsyncPayoutService
+from dpay.recurring.service import AsyncRecurringService
 from dpay.refund.service import AsyncRefundService
 from dpay.version import SDK_VERSION
+from dpay.webhook.service import AsyncEventService
 
 
 class AsyncDPayClient:
@@ -48,6 +50,8 @@ class AsyncDPayClient:
         self.blik = AsyncBlikService(api)
         self.cards = AsyncCardService(api)
         self.payouts = AsyncPayoutService(api)
+        self.recurring = AsyncRecurringService(api)
+        self.events = AsyncEventService(api)
 
     async def aclose(self) -> None:
         closer = getattr(self._transport, "aclose", None)

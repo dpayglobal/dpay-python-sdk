@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -77,6 +78,26 @@ def test_register_rejected_with_error_flag(client: DPayClient, transport: MockHt
     assert error.value.http_status == 200
     assert error.value.error_code == "err05"
     assert error.value.transaction_id == "tx-9"
+    assert error.value.error_description is None
+
+
+def test_register_rejection_carries_the_error_description(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(
+        200,
+        {
+            "error": True,
+            "msg": "Transaction canceled",
+            "status": False,
+            "transactionId": "tx-9",
+            "additionalInfo": {"error": "INSUFFICIENT_FUNDS", "error_description": "IssId: 1"},
+        },
+    )
+    with pytest.raises(PaymentRejectedError) as error:
+        client.payments.register(_request())
+    assert error.value.error_code == "INSUFFICIENT_FUNDS"
+    assert error.value.error_description == "IssId: 1"
 
 
 def test_register_rejected_with_status_false(client: DPayClient, transport: MockHttpClient) -> None:
@@ -297,22 +318,10 @@ def test_blik_rejects_unknown_alias_type(client: DPayClient) -> None:
         client.blik.alias("a-1", "NOPE")
 
 
-def test_blik_recurring_status_unwraps_envelope(client: DPayClient, transport: MockHttpClient) -> None:
-    transport.queue_json(
-        200,
-        {
-            "data": {
-                "alias_value": "a-1",
-                "status": "ACTIVE",
-                "registration": {"model": "M", "frequency": "1M", "limit_amt": 100},
-            }
-        },
-    )
-    status = client.blik.recurring_status("a-1")
-    assert status.is_active
-    assert status.registration is not None
-    assert status.registration.model == "M"
-    assert status.registration.limit_amt == 100
+def test_blik_recurring_status_moved_to_recurring_service(client: DPayClient) -> None:
+    # blik/recurring/status was removed from the API - client.recurring.status() replaces it
+    assert not hasattr(client.blik, "recurring_status")
+    assert callable(client.recurring.status)
 
 
 def test_card_public_key_is_trimmed(client: DPayClient, transport: MockHttpClient) -> None:
@@ -326,10 +335,64 @@ def test_card_path_encodes_transaction_id(client: DPayClient, transport: MockHtt
     assert transport.last_request.url.endswith("/cards/payment/tx%201%2F2/pay/card-otp")
 
 
-def test_card_capture_sends_amount(client: DPayClient, transport: MockHttpClient) -> None:
+def _shop_client(transport: MockHttpClient) -> DPayClient:
+    return DPayClient(service="MyShop", secret_hash="secret123", http_client=transport)
+
+
+def test_card_capture_signs_the_operation(transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"success": True, "status": "success", "message": {"redirectType": "SUCCESS"}})
+    result = _shop_client(transport).cards.capture("TX-1", Money.pln(5999))
+
+    assert result.is_success
+    assert transport.last_request.url == "https://api-payments.dpay.pl/api/v1_0/cards/payment/TX-1/capture"
+    # sha256(capture|service|transaction_id|amount|hash)
+    assert transport.last_request.body == (
+        '{"service":"MyShop","amount":59.99,'
+        '"checksum":"f9f3713764216075a7e1e56a10baa695f802929e70453a0b68146d56d5d3c925"}'
+    )
+
+
+def test_card_cancel_without_amount_signs_an_empty_amount(transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"success": True, "status": "success", "message": {"redirectType": "SUCCESS"}})
+    _shop_client(transport).cards.cancel("TX-1")
+
+    assert (
+        transport.last_request.url == "https://api-payments.dpay.pl/api/v1_0/cards/payment/TX-1/cancellation"
+    )
+    # sha256(cancellation|service|transaction_id||hash) - empty amount segment
+    assert transport.last_request.body == (
+        '{"service":"MyShop","checksum":"adde47e5fce49c92912d41cb34f44b363c6fe426f0c14aa3b5f58a061c7f4c4c"}'
+    )
+
+
+def test_card_cancel_with_amount_signs_two_decimals(client: DPayClient, transport: MockHttpClient) -> None:
     transport.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
-    client.cards.capture("tx-1", Money.pln(2999))
-    assert transport.last_request_body == {"amount": 29.99}
+    client.cards.cancel("tx-1", Money.pln(3000))
+
+    body = transport.last_request_body
+    assert list(body) == ["service", "amount", "checksum"]
+    assert body["amount"] == 30
+    expected = hashlib.sha256(f"cancellation|{SERVICE}|tx-1|30.00|{SECRET}".encode()).hexdigest()
+    assert body["checksum"] == expected
+
+
+def test_card_checksum_uses_the_raw_transaction_id(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
+    client.cards.capture("tx 1/2", Money.pln(100))
+
+    assert transport.last_request.url.endswith("/cards/payment/tx%201%2F2/capture")
+    expected = hashlib.sha256(f"capture|{SERVICE}|tx 1/2|1.00|{SECRET}".encode()).hexdigest()
+    assert transport.last_request_body["checksum"] == expected
+
+
+def test_card_capture_error_code_comes_from_code(transport: MockHttpClient) -> None:
+    transport.queue_json(
+        401,
+        {"success": False, "status": "error", "code": "INVALID_CHECKSUM", "message": "Invalid checksum"},
+    )
+    with pytest.raises(AuthenticationError) as error:
+        _shop_client(transport).cards.capture("TX-1", Money.pln(100))
+    assert error.value.error_code == "INVALID_CHECKSUM"
 
 
 def test_card_business_failure_raises(client: DPayClient, transport: MockHttpClient) -> None:

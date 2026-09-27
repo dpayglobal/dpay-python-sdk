@@ -5,12 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from dpay.bank.models import Bank
-from dpay.blik.models import BlikAlias, BlikRecurringStatus
+from dpay.blik.models import BlikAlias
 from dpay.card.results import CardPaymentResult
 from dpay.money import Money
 from dpay.payment.models import RegisteredPayment, Transaction
 from dpay.payout.models import PayoutDetails
+from dpay.recurring.models import RecurringRetryResult, RecurringStatus
 from dpay.refund.models import Refund, RefundAvailability
+from dpay.webhook.event import WebhookEvent
 
 FIXTURES: dict[str, list[Any]] = json.loads(
     (Path(__file__).parent / "golden" / "response_fixtures.json").read_text("utf-8")
@@ -55,13 +57,21 @@ def run() -> dict[str, Any]:
     out["blik_alias"] = {
         str(index): _blik_alias(BlikAlias.from_api(data)) for index, data in enumerate(FIXTURES["blik_alias"])
     }
-    out["blik_recurring"] = {
-        str(index): _blik_recurring(BlikRecurringStatus.from_api(data))
-        for index, data in enumerate(FIXTURES["blik_recurring"])
-    }
     out["card_result"] = {
         str(index): _card_result(CardPaymentResult.from_api(data))
         for index, data in enumerate(FIXTURES["card_result"])
+    }
+    out["recurring_status"] = {
+        str(index): _recurring_status(RecurringStatus.from_api(data))
+        for index, data in enumerate(FIXTURES["recurring_status"])
+    }
+    out["recurring_retry"] = {
+        str(index): _recurring_retry(RecurringRetryResult.from_api(data))
+        for index, data in enumerate(FIXTURES["recurring_retry"])
+    }
+    out["webhook_event"] = {
+        str(index): _webhook_event(WebhookEvent.from_api(data))
+        for index, data in enumerate(FIXTURES["webhook_event"])
     }
     return out
 
@@ -75,6 +85,8 @@ def _registered(payment: RegisteredPayment) -> dict[str, Any]:
         "is_internal_processing": payment.is_internal_processing,
         "ipksef": payment.ipksef,
         "card_recurring_alias": payment.card_recurring_alias,
+        "recurring_alias": payment.recurring_alias,
+        "recurring_methods": payment.recurring_methods,
     }
 
 
@@ -162,26 +174,55 @@ def _blik_alias(alias: BlikAlias) -> dict[str, Any]:
     }
 
 
-def _blik_recurring(status: BlikRecurringStatus) -> dict[str, Any]:
+def _recurring_status(status: RecurringStatus) -> dict[str, Any]:
     registration = status.registration
     return {
-        "alias_value": status.alias_value,
-        "alias_type": status.alias_type,
+        "alias": status.alias,
+        "method": status.method,
         "status": status.status,
         "is_active": status.is_active,
         "expiration_date": status.expiration_date,
         "registration": None
         if registration is None
         else {
+            "transaction_id": registration.transaction_id,
+            "label": registration.label,
             "model": registration.model,
             "frequency": registration.frequency,
             "limit_amt": registration.limit_amt,
             "tot_limit_amt": registration.tot_limit_amt,
             "is_limit_amt_fixed": registration.is_limit_amt_fixed,
             "init_date": registration.init_date,
-            "label": registration.label,
+            "terms_url": registration.terms_url,
+            "terms_version": registration.terms_version,
             "registered_at": registration.registered_at,
         },
+    }
+
+
+def _recurring_retry(retry: RecurringRetryResult) -> dict[str, Any]:
+    return {
+        "transaction_id": retry.transaction_id,
+        "status": retry.status,
+        "is_pending": retry.is_pending,
+        "is_failed": retry.is_failed,
+        "count": retry.count,
+        "error_code": retry.error_code,
+        "error_description": retry.error_description,
+    }
+
+
+def _webhook_event(event: WebhookEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "type": event.type,
+        "api_version": event.api_version,
+        "created": event.created,
+        "livemode": event.is_livemode,
+        "service": event.service,
+        "merchant_ref": event.merchant_ref,
+        "object_type": event.object_type,
+        "object": event.object,
     }
 
 

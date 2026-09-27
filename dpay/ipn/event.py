@@ -10,6 +10,7 @@ IpnTypeValue = Literal["transfer", "capture", "dcb"]
 
 class IpnType:
     TRANSFER = "transfer"
+    # Deprecated: dpay no longer sends capture IPNs - use the ``payment.captured`` webhook event.
     CAPTURE = "capture"
     DCB = "dcb"
 
@@ -53,6 +54,7 @@ class IpnEvent:
 
     @property
     def is_capture(self) -> bool:
+        """Deprecated: dpay no longer sends capture IPNs - use the ``payment.captured`` webhook event."""
         return self.type == IpnType.CAPTURE
 
     @property
@@ -75,6 +77,7 @@ class IpnEvent:
 
     @property
     def capture_payment_id(self) -> str | None:
+        """Deprecated: dpay no longer sends capture IPNs - use the ``payment.captured`` webhook event."""
         return self._scalar("capture_payment_id", None)
 
     @property

@@ -7,6 +7,7 @@ from dpay.card import ops
 from dpay.card.requests import ApplePayRequest, CardPaymentRequest, GooglePayRequest
 from dpay.card.results import CardPaymentResult
 from dpay.money import Money
+from dpay.webhook.target import WebhookTarget
 
 
 class CardService:
@@ -22,11 +23,24 @@ class CardService:
     def pre_auth(self, transaction_id: str, request: CardPaymentRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, self._api.execute(ops.pre_auth(transaction_id, request)))
 
-    def capture(self, transaction_id: str, amount: Money) -> CardPaymentResult:
-        return cast(CardPaymentResult, self._api.execute(ops.capture(transaction_id, amount)))
+    def capture(
+        self, transaction_id: str, amount: Money, webhook: WebhookTarget | None = None
+    ) -> CardPaymentResult:
+        """Captures a pre-authorised amount (partial captures allowed up to the authorisation).
+
+        Signed with sha256(capture|service|transaction_id|amount|hash). The optional webhook target
+        receives the ``payment.captured`` event.
+        """
+        operation = ops.capture(self._api.service, self._api.checksum, transaction_id, amount, webhook)
+        return cast(CardPaymentResult, self._api.execute(operation))
 
     def cancel(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
-        return cast(CardPaymentResult, self._api.execute(ops.cancel(transaction_id, amount)))
+        """Cancels the pre-authorisation - without an amount the whole uncaptured remainder.
+
+        Signed with sha256(cancellation|service|transaction_id|amount|hash).
+        """
+        operation = ops.cancel(self._api.service, self._api.checksum, transaction_id, amount)
+        return cast(CardPaymentResult, self._api.execute(operation))
 
     def google_pay(self, transaction_id: str, request: GooglePayRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, self._api.execute(ops.google_pay(transaction_id, request)))
@@ -48,11 +62,15 @@ class AsyncCardService:
     async def pre_auth(self, transaction_id: str, request: CardPaymentRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, await self._api.execute(ops.pre_auth(transaction_id, request)))
 
-    async def capture(self, transaction_id: str, amount: Money) -> CardPaymentResult:
-        return cast(CardPaymentResult, await self._api.execute(ops.capture(transaction_id, amount)))
+    async def capture(
+        self, transaction_id: str, amount: Money, webhook: WebhookTarget | None = None
+    ) -> CardPaymentResult:
+        operation = ops.capture(self._api.service, self._api.checksum, transaction_id, amount, webhook)
+        return cast(CardPaymentResult, await self._api.execute(operation))
 
     async def cancel(self, transaction_id: str, amount: Money | None = None) -> CardPaymentResult:
-        return cast(CardPaymentResult, await self._api.execute(ops.cancel(transaction_id, amount)))
+        operation = ops.cancel(self._api.service, self._api.checksum, transaction_id, amount)
+        return cast(CardPaymentResult, await self._api.execute(operation))
 
     async def google_pay(self, transaction_id: str, request: GooglePayRequest) -> CardPaymentResult:
         return cast(CardPaymentResult, await self._api.execute(ops.google_pay(transaction_id, request)))

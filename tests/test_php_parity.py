@@ -41,7 +41,7 @@ ACTUAL_LEAVES = _leaves(ACTUAL)
 
 
 def test_golden_covers_every_endpoint() -> None:
-    assert len(GOLDEN["calls"]) == 23
+    assert len(GOLDEN["calls"]) == 29
     assert len(ACTUAL["calls"]) == len(GOLDEN["calls"])
 
 

@@ -60,6 +60,41 @@ def test_error_code_uses_lowercase_key() -> None:
     assert map_error(_response(400, '{"errorCode":"err01"}')).error_code is None
 
 
+def test_maps_the_code_and_reason_of_cards_and_webhook_errors() -> None:
+    body = (
+        '{"success":false,"status":"error","code":"WEBHOOK_URL_INVALID","reason":"https_required",'
+        '"message":"Invalid webhook URL: https_required"}'
+    )
+    error = map_error(_response(400, body))
+
+    assert isinstance(error, InvalidRequestError)
+    assert error.error_code == "WEBHOOK_URL_INVALID"
+    assert error.reason == "https_required"
+    assert error.message == "Invalid webhook URL: https_required"
+
+
+def test_maps_a_missing_checksum_to_an_authentication_error() -> None:
+    body = '{"success":false,"status":"error","code":"CHECKSUM_REQUIRED","message":"Missing service or checksum"}'
+    error = map_error(_response(401, body))
+
+    assert type(error) is AuthenticationError
+    assert error.error_code == "CHECKSUM_REQUIRED"
+    assert error.reason is None
+
+
+def test_code_wins_over_errorcode_and_non_strings_are_ignored() -> None:
+    assert map_error(_response(400, '{"code":"A","errorcode":"B"}')).error_code == "A"
+    assert map_error(_response(400, '{"code":7,"errorcode":"B"}')).error_code == "B"
+    assert map_error(_response(400, '{"reason":["x"]}')).reason is None
+
+
+def test_rate_limit_has_no_reason() -> None:
+    error = map_error(_response(429, '{"code":"X","reason":"y"}'))
+    assert isinstance(error, RateLimitError)
+    assert error.error_code is None
+    assert error.reason is None
+
+
 def test_field_errors_normalize_400_shape() -> None:
     error = map_error(_response(400, '{"errors":{"value":"jest wymagane"}}'))
     assert error.field_errors == {"value": ["jest wymagane"]}

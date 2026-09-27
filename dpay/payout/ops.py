@@ -19,7 +19,7 @@ def details(
     if timestamp is not None:
         body["timestamp"] = timestamp
     body["withdraw_id"] = withdraw_id
-    body["checksum"] = checksum.ordered_body(list(body.values()))
+    body["checksum"] = checksum.ordered_body(body)
     return Operation(
         "POST",
         base_urls.PANEL,

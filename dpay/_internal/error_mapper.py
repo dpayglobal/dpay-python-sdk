@@ -27,7 +27,13 @@ def map_error(response: ApiResponse) -> ApiError:
     elif isinstance(data.get("msg"), str):
         message = data["msg"]
 
-    error_code = data["errorcode"] if isinstance(data.get("errorcode"), str) else None
+    # Cards API and webhook errors carry ``code`` (e.g. CHECKSUM_REQUIRED, WEBHOOK_URL_INVALID)
+    error_code: str | None = None
+    if isinstance(data.get("code"), str):
+        error_code = data["code"]
+    elif isinstance(data.get("errorcode"), str):
+        error_code = data["errorcode"]
+    reason = data["reason"] if isinstance(data.get("reason"), str) else None
     field_errors = _normalize_field_errors(data.get("errors"))
 
     if status == 429:
@@ -40,16 +46,16 @@ def map_error(response: ApiResponse) -> ApiError:
             raw_body,
         )
     if status == 401:
-        return AuthenticationError(message, status, error_code, field_errors, raw_body)
+        return AuthenticationError(message, status, error_code, field_errors, raw_body, reason)
     if status == 403:
-        return AccessDeniedError(message, status, error_code, field_errors, raw_body)
+        return AccessDeniedError(message, status, error_code, field_errors, raw_body, reason)
     if status == 404:
-        return NotFoundError(message, status, error_code, field_errors, raw_body)
+        return NotFoundError(message, status, error_code, field_errors, raw_body, reason)
     if status in (400, 422):
-        return InvalidRequestError(message, status, error_code, field_errors, raw_body)
+        return InvalidRequestError(message, status, error_code, field_errors, raw_body, reason)
     if status >= 500:
-        return ApiServerError(message, status, error_code, field_errors, raw_body)
-    return ApiError(message, status, error_code, field_errors, raw_body)
+        return ApiServerError(message, status, error_code, field_errors, raw_body, reason)
+    return ApiError(message, status, error_code, field_errors, raw_body, reason)
 
 
 def _normalize_field_errors(errors: Any) -> dict[str, list[str]]:

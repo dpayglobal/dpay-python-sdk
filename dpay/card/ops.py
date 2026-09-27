@@ -4,12 +4,15 @@ from typing import Any
 from urllib.parse import quote
 
 from dpay._internal import base_urls
+from dpay._internal.checksum import ChecksumCalculator
 from dpay._internal.operation import Operation, decode_dict_or_fail
 from dpay.card.requests import ApplePayRequest, CardPaymentRequest, GooglePayRequest
 from dpay.card.results import CardPaymentResult
 from dpay.exceptions import CardPaymentError
 from dpay.http.models import ApiResponse
 from dpay.money import Money
+from dpay.webhook.event_type import WebhookEventType
+from dpay.webhook.target import WebhookTarget
 
 
 def public_key() -> Operation:
@@ -41,12 +44,32 @@ def pre_auth(transaction_id: str, request: CardPaymentRequest) -> Operation:
     return _payment(transaction_id, "/pay/card-pre-auth", request.to_api())
 
 
-def capture(transaction_id: str, amount: Money) -> Operation:
-    return _payment(transaction_id, "/capture", {"amount": float(amount.to_decimal())})
+def capture(
+    service: str,
+    checksum: ChecksumCalculator,
+    transaction_id: str,
+    amount: Money,
+    webhook: WebhookTarget | None = None,
+) -> Operation:
+    body: dict[str, Any] = {"service": service, "amount": float(amount.to_decimal())}
+    if webhook is not None:
+        webhook.assert_events_allowed(WebhookEventType.CAPTURE, "a card capture")
+        body["webhook"] = webhook.to_api()
+    # sha256(capture|service|transaction_id|amount|hash) - the webhook object stays out of the checksum
+    body["checksum"] = checksum.operation("capture", service, transaction_id, amount.to_decimal())
+    return _payment(transaction_id, "/capture", body)
 
 
-def cancel(transaction_id: str, amount: Money | None) -> Operation:
-    body: dict[str, Any] = {} if amount is None else {"amount": float(amount.to_decimal())}
+def cancel(
+    service: str, checksum: ChecksumCalculator, transaction_id: str, amount: Money | None
+) -> Operation:
+    body: dict[str, Any] = {"service": service}
+    if amount is not None:
+        body["amount"] = float(amount.to_decimal())
+    # sha256(cancellation|service|transaction_id|amount|hash) - empty amount segment without an amount
+    body["checksum"] = checksum.operation(
+        "cancellation", service, transaction_id, None if amount is None else amount.to_decimal()
+    )
     return _payment(transaction_id, "/cancellation", body)
 
 

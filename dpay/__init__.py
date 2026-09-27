@@ -4,9 +4,6 @@ from dpay.blik import (
     BlikAliasRegistration,
     BlikAliasType,
     BlikApp,
-    BlikRecurringRegistration,
-    BlikRecurringRegistrationInfo,
-    BlikRecurringStatus,
 )
 from dpay.card import (
     ApplePayRequest,
@@ -61,8 +58,21 @@ from dpay.payment import (
     TransactionType,
 )
 from dpay.payout import PayoutDetails, PayoutReceiver
+from dpay.recurring import (
+    RecurringRegistration,
+    RecurringRegistrationInfo,
+    RecurringRetryResult,
+    RecurringStatus,
+)
 from dpay.refund import Refund, RefundAvailability
 from dpay.version import SDK_VERSION, __version__
+from dpay.webhook import (
+    EventPage,
+    WebhookEvent,
+    WebhookEventType,
+    WebhookTarget,
+    WebhookVerifier,
+)
 
 __all__ = [
     "SDK_VERSION",
@@ -79,9 +89,6 @@ __all__ = [
     "BlikAliasRegistration",
     "BlikAliasType",
     "BlikApp",
-    "BlikRecurringRegistration",
-    "BlikRecurringRegistrationInfo",
-    "BlikRecurringStatus",
     "CardData",
     "CardEncryptionError",
     "CardEncryptor",
@@ -100,6 +107,7 @@ __all__ = [
     "DccMarkup",
     "DccOffer",
     "DeviceInfo",
+    "EventPage",
     "GooglePayRequest",
     "HttpClient",
     "InvalidRequestError",
@@ -117,6 +125,10 @@ __all__ = [
     "PayoutPosition",
     "PayoutReceiver",
     "RateLimitError",
+    "RecurringRegistration",
+    "RecurringRegistrationInfo",
+    "RecurringRetryResult",
+    "RecurringStatus",
     "RedirectType",
     "Refund",
     "RefundAvailability",
@@ -129,5 +141,9 @@ __all__ = [
     "TransactionStatus",
     "TransactionType",
     "TransportError",
+    "WebhookEvent",
+    "WebhookEventType",
+    "WebhookTarget",
+    "WebhookVerifier",
     "__version__",
 ]

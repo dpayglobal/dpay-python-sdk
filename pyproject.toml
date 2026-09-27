@@ -21,6 +21,8 @@ keywords = [
     "cards",
     "payouts",
     "ipn",
+    "webhooks",
+    "recurring-payments",
     "sdk",
 ]
 authors = [{ name = "dpay", email = "kontakt@dpay.pl" }]

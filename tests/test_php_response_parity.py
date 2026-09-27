@@ -52,8 +52,10 @@ def test_every_model_group_is_covered() -> None:
         "availability",
         "payout",
         "blik_alias",
-        "blik_recurring",
         "card_result",
+        "recurring_status",
+        "recurring_retry",
+        "webhook_event",
     }
 
 

@@ -60,6 +60,25 @@ class RegisteredPayment:
             return _strict_string_or_none(additional, "card_recurring_alias")
         return None
 
+    @property
+    def recurring_alias(self) -> str | None:
+        """Alias of the recurring payment registered with this payment (``with_recurring_registration``)."""
+        return _strict_string_or_none(self._recurring_registration(), "alias")
+
+    @property
+    def recurring_methods(self) -> list[str]:
+        methods = self._recurring_registration().get("methods")
+        if isinstance(methods, dict):
+            methods = list(methods.values())
+        if not isinstance(methods, list):
+            return []
+        return [method for method in methods if isinstance(method, str)]
+
+    def _recurring_registration(self) -> dict[str, Any]:
+        additional = self.raw.get("additionalInfo")
+        registration = additional.get("recurring_registration") if isinstance(additional, dict) else None
+        return registration if isinstance(registration, dict) else {}
+
 
 class TransactionRefund:
     def __init__(self, raw: dict[str, Any]) -> None:

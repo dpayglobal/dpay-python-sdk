@@ -4,14 +4,14 @@ from typing import Literal
 
 from dpay.exceptions import DPayValueError
 
-BlikAliasTypeValue = Literal["UID", "PAYID"]
+BlikAliasTypeValue = Literal["UID"]
 
 
 class BlikAliasType:
+    # BLIK OneClick alias. Recurring payments (PAYID) are handled by ``DPayClient.recurring``.
     UID = "UID"
-    PAYID = "PAYID"
 
-    ALL = (UID, PAYID)
+    ALL = (UID,)
 
     @staticmethod
     def assert_valid(value: str) -> None:

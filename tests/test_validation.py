@@ -5,7 +5,7 @@ import pytest
 from dpay import (
     ApplePayRequest,
     BlikAliasRegistration,
-    BlikRecurringRegistration,
+    BlikAliasType,
     CardData,
     CardRecurringRegistration,
     Currency,
@@ -49,6 +49,24 @@ def test_return_urls_reject_invalid(url: str) -> None:
 def test_return_urls_report_the_failing_field() -> None:
     with pytest.raises(DPayValueError, match="Invalid ipn URL"):
         ReturnUrls("https://a.pl", "https://a.pl", "nope")
+
+
+def test_return_urls_ipn_is_optional() -> None:
+    urls = ReturnUrls("https://a.pl/ok", "https://a.pl/fail")
+    assert urls.ipn is None
+
+    body = RegisterPaymentRequest.create(Money.pln(1), TransactionType.TRANSFERS, urls).to_api("s")
+    assert "url_ipn" not in body
+    assert list(body) == ["service", "value", "transactionType", "url_success", "url_fail"]
+
+
+def test_transaction_types_after_removing_blik_recurring_and_bizum_direct() -> None:
+    assert TransactionType.ALL == ("transfers", "dcb_gateway", "card_auth", "mb_way_direct", "card_recurring")
+    for removed in ("blik_recurring", "bizum_direct"):
+        with pytest.raises(DPayValueError, match=f'Invalid transaction type "{removed}"'):
+            TransactionType.assert_valid(removed)
+    assert not hasattr(TransactionType, "BLIK_RECURRING")
+    assert not hasattr(TransactionType, "BIZUM_DIRECT")
 
 
 def test_payer_validates_email() -> None:
@@ -195,28 +213,12 @@ def test_blik_alias_label_length() -> None:
         BlikAliasRegistration("x" * 51)
 
 
-def test_blik_recurring_model_and_frequency() -> None:
-    with pytest.raises(DPayValueError, match='Invalid recurring model "X"'):
-        BlikRecurringRegistration.create("etykieta", "X", "1M")
-    with pytest.raises(DPayValueError, match='Invalid recurring frequency "0M"'):
-        BlikRecurringRegistration.create("etykieta", "M", "0M")
-
-
-def test_blik_recurring_type_is_always_payid() -> None:
-    data = BlikRecurringRegistration.create("etykieta", "M", "1M").to_api()
-    assert data["type"] == "PAYID"
-    assert list(data) == ["label", "type", "model", "frequency"]
-
-
-def test_blik_recurring_dates_are_validated() -> None:
-    registration = BlikRecurringRegistration.create("etykieta", "M", "1M")
-    with pytest.raises(DPayValueError, match="must be in YYYY-MM-DD format"):
-        registration.with_expiration_date("01-01-2027")
-
-
-def test_blik_recurring_limits_are_raw_integers() -> None:
-    data = BlikRecurringRegistration.create("e", "M", "1M").with_limit_amt(100).to_api()
-    assert data["limit_amt"] == 100
+def test_blik_aliases_are_only_uid() -> None:
+    # PAYID aliases are recurring payments - DPayClient.recurring
+    assert BlikAliasType.ALL == ("UID",)
+    assert BlikAliasRegistration("etykieta").to_api() == {"label": "etykieta", "type": "UID"}
+    with pytest.raises(DPayValueError, match='Invalid BLIK alias type "PAYID"'):
+        BlikAliasRegistration("etykieta", "PAYID")
 
 
 def test_card_recurring_limits_use_minor_units() -> None:
