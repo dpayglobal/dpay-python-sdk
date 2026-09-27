@@ -5,10 +5,12 @@ from typing import cast
 from dpay._internal.requestor import ApiRequestor, AsyncApiRequestor
 from dpay.blik import ops
 from dpay.blik.enums import BlikAliasType
-from dpay.blik.models import BlikAlias, BlikRecurringStatus
+from dpay.blik.models import BlikAlias
 
 
 class BlikService:
+    """BLIK OneClick aliases (UID). Recurring payments are handled by ``DPayClient.recurring``."""
+
     def __init__(self, api: ApiRequestor) -> None:
         self._api = api
 
@@ -26,10 +28,6 @@ class BlikService:
             self._api.service, self._api.checksum, alias_value, alias_type, reason
         )
         self._api.execute(operation)
-
-    def recurring_status(self, alias_value: str) -> BlikRecurringStatus:
-        operation = ops.recurring_status(self._api.service, self._api.checksum, alias_value)
-        return cast(BlikRecurringStatus, self._api.execute(operation))
 
 
 class AsyncBlikService:
@@ -50,7 +48,3 @@ class AsyncBlikService:
             self._api.service, self._api.checksum, alias_value, alias_type, reason
         )
         await self._api.execute(operation)
-
-    async def recurring_status(self, alias_value: str) -> BlikRecurringStatus:
-        operation = ops.recurring_status(self._api.service, self._api.checksum, alias_value)
-        return cast(BlikRecurringStatus, await self._api.execute(operation))

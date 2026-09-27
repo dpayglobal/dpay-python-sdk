@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from dpay._internal.validation import is_valid_url
+from dpay._internal.validation import byte_length, is_valid_ip, is_valid_url
 from dpay.currency import Currency
 from dpay.exceptions import DPayValueError
 from dpay.money import Money
@@ -14,13 +14,19 @@ from dpay.payment.invoice import InvoiceDetails
 from dpay.payment.payer import Payer
 from dpay.payment.payout_instruction import PayoutInstruction
 from dpay.payment.return_urls import ReturnUrls
+from dpay.webhook.event_type import WebhookEventType
 
 if TYPE_CHECKING:
-    from dpay.blik.registration import BlikAliasRegistration, BlikRecurringRegistration
+    from dpay.blik.registration import BlikAliasRegistration
     from dpay.card.recurring import CardRecurringRegistration
+    from dpay.recurring.registration import RecurringRegistration
+    from dpay.webhook.target import WebhookTarget
 
 _PARTNER_PLATFORM = re.compile(r"^[A-Z0-9]{1,64}$")
 _BLIK_CODE = re.compile(r"^\d{6}$")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+# Characters PHP trim() removes - the API trims strings the same way before validation
+_TRIMMED = " \t\n\r\x00\x0b"
 
 
 class RegisterPaymentRequest:
@@ -48,7 +54,10 @@ class RegisterPaymentRequest:
         self.blik_code: str | None = None
         self.blik_alias: str | None = None
         self.register_blik_alias: BlikAliasRegistration | None = None
-        self.register_blik_recurring_alias: BlikRecurringRegistration | None = None
+        self.recurring_registration: RecurringRegistration | None = None
+        self.recurring_alias: str | None = None
+        self.webhook: WebhookTarget | None = None
+        self.reference: str | None = None
         self.alias_ipn_url: str | None = None
         self.no_delay: bool | None = None
         self.card_recurring: CardRecurringRegistration | None = None
@@ -142,9 +151,12 @@ class RegisterPaymentRequest:
         if (
             self.blik_code is not None
             or self.register_blik_alias is not None
-            or self.register_blik_recurring_alias is not None
+            or self.recurring_registration is not None
+            or self.recurring_alias is not None
         ):
-            raise DPayValueError("blik_alias cannot be combined with blik_code or alias registration")
+            raise DPayValueError(
+                "blik_alias cannot be combined with blik_code, alias registration or recurring payments"
+            )
         self.blik_alias = alias_value
         self.user_agent = user_agent
         self.user_ip = user_ip
@@ -156,12 +168,52 @@ class RegisterPaymentRequest:
         self.register_blik_alias = registration
         return self
 
-    def with_register_blik_recurring_alias(
-        self, registration: BlikRecurringRegistration
-    ) -> RegisterPaymentRequest:
-        if self.blik_alias is not None:
-            raise DPayValueError("register_blik_recurring_alias cannot be combined with blik_alias")
-        self.register_blik_recurring_alias = registration
+    def with_recurring_registration(self, registration: RecurringRegistration) -> RegisterPaymentRequest:
+        """Registers a recurring payment together with this payment.
+
+        Requires the customer's BLIK code (``with_blik_code``) and transaction type ``transfers``;
+        the amount may be 0 (consent only) or an initial fee.
+        """
+        self.recurring_registration = registration
+        return self
+
+    def with_recurring_alias(self, alias: str) -> RegisterPaymentRequest:
+        """Charges a registered recurring payment server-to-server (no BLIK code).
+
+        Transaction type ``transfers``, amount above 0. The alias is appended to the checksum,
+        binding the charge to that customer.
+        """
+        if alias == "" or byte_length(alias) > 128:
+            raise DPayValueError("Recurring alias must be 1-128 characters")
+        self.recurring_alias = alias
+        return self
+
+    def with_client_context(self, user_agent: str, user_ip: str) -> RegisterPaymentRequest:
+        """Payer's user agent and IP for a recurring charge (optional there).
+
+        BLIK code and alias payments set them in ``with_blik_code`` / ``with_blik_alias``.
+        """
+        if not is_valid_ip(user_ip):
+            raise DPayValueError(f'Invalid user IP "{user_ip}"')
+        self.user_agent = user_agent
+        self.user_ip = user_ip
+        return self
+
+    def with_webhook(self, webhook: WebhookTarget) -> RegisterPaymentRequest:
+        """Sends the events of this payment (and later of its refunds and recurring payment) to this URL too.
+
+        Signed with the service's webhook secret. Not part of the checksum.
+        """
+        webhook.assert_events_allowed(WebhookEventType.PAYMENT_REGISTRATION, "a payment registration")
+        self.webhook = webhook
+        return self
+
+    def with_reference(self, reference: str) -> RegisterPaymentRequest:
+        """Your reference of the payment (max 64 characters), returned as ``references.merchant``."""
+        reference = reference.strip(_TRIMMED)
+        if reference == "" or len(reference) > 64 or _CONTROL_CHARACTERS.search(reference) is not None:
+            raise DPayValueError("Reference must be 1-64 characters without control characters")
+        self.reference = reference
         return self
 
     def with_alias_ipn_url(self, url: str) -> RegisterPaymentRequest:
@@ -225,14 +277,17 @@ class RegisterPaymentRequest:
         return self
 
     def to_api(self, service: str) -> dict[str, Any]:
+        self._assert_recurring_combination()
+
         body: dict[str, Any] = {
             "service": service,
             "value": self.amount.to_decimal(),
             "transactionType": self.transaction_type,
             "url_success": self.urls.success,
             "url_fail": self.urls.fail,
-            "url_ipn": self.urls.ipn,
         }
+        if self.urls.ipn is not None:
+            body["url_ipn"] = self.urls.ipn
 
         if self.description is not None:
             body["description"] = self.description
@@ -275,8 +330,10 @@ class RegisterPaymentRequest:
             body["blik_alias"] = self.blik_alias
         if self.register_blik_alias is not None:
             body["register_blik_alias"] = self.register_blik_alias.to_api()
-        if self.register_blik_recurring_alias is not None:
-            body["register_blik_recurring_alias"] = self.register_blik_recurring_alias.to_api()
+        if self.recurring_registration is not None:
+            body["recurring_registration"] = self.recurring_registration.to_api()
+        if self.recurring_alias is not None:
+            body["recurring_alias"] = self.recurring_alias
         if self.alias_ipn_url is not None:
             body["alias_ipn_url"] = self.alias_ipn_url
         if self.no_delay is not None:
@@ -303,5 +360,36 @@ class RegisterPaymentRequest:
             body["efaktura"] = self.efaktura
         if self.invoice is not None:
             body["invoice"] = self.invoice.to_api()
+        if self.webhook is not None:
+            body["webhook"] = self.webhook.to_api()
+        if self.reference is not None:
+            body["reference"] = self.reference
 
         return body
+
+    def _assert_recurring_combination(self) -> None:
+        if self.recurring_registration is None and self.recurring_alias is None:
+            return
+        if self.recurring_registration is not None and self.recurring_alias is not None:
+            raise DPayValueError("recurring_registration cannot be combined with recurring_alias")
+        if self.transaction_type != TransactionType.TRANSFERS:
+            raise DPayValueError('Recurring payments require transactionType "transfers"')
+        conflicts: list[tuple[str, object]] = [
+            ("blik_alias", self.blik_alias),
+            ("register_blik_alias", self.register_blik_alias),
+            ("register_card_recurring", self.card_recurring),
+            ("card_recurring_alias", self.card_recurring_alias),
+        ]
+        if self.recurring_registration is not None:
+            conflicts.append(("channel", self.channel))
+            if self.blik_code is None:
+                raise DPayValueError(
+                    "recurring_registration requires the customer's BLIK code (with_blik_code)"
+                )
+        else:
+            conflicts.append(("blik_code", self.blik_code))
+            if self.amount.minor <= 0:
+                raise DPayValueError("A recurring charge requires an amount above 0")
+        for field, value in conflicts:
+            if value is not None:
+                raise DPayValueError(f"{field} cannot be combined with a recurring payment")

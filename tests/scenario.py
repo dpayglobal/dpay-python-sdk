@@ -6,7 +6,6 @@ from typing import Any
 from dpay import (
     ApplePayRequest,
     BlikAliasRegistration,
-    BlikRecurringRegistration,
     CardPaymentRequest,
     CardRecurringOperation,
     CardRecurringRegistration,
@@ -22,9 +21,11 @@ from dpay import (
     PayoutFeeMode,
     PayoutInstruction,
     PayoutPosition,
+    RecurringRegistration,
     RegisterPaymentRequest,
     ReturnUrls,
     TransactionType,
+    WebhookTarget,
 )
 from dpay._internal.checksum import ChecksumCalculator
 from dpay._internal.php import php_json_encode, php_strval
@@ -148,18 +149,23 @@ def run() -> dict[str, Any]:
     dpay.payments.register(
         RegisterPaymentRequest.create(
             Money.pln(1000),
-            TransactionType.BLIK_RECURRING,
+            TransactionType.TRANSFERS,
             ReturnUrls("https://shop.test/ok", "https://shop.test/fail", "https://shop.test/ipn"),
         )
         .with_blik_code("123456", "UA/1.0", "10.0.0.1")
-        .with_register_blik_recurring_alias(
-            BlikRecurringRegistration.create("Subskrypcja", "M", "12M")
-            .with_value(Money.pln(4999))
+        .with_recurring_registration(
+            RecurringRegistration.create(
+                "Subskrypcja", RecurringRegistration.MODEL_M, "https://shop.test/regulamin"
+            )
+            .with_alias("SUB-1")
+            .with_frequency("12M")
             .with_limit_amt(100000)
             .with_tot_limit_amt(500000)
             .with_limit_amt_fixed(True)
             .with_expiration_date("2027-01-01")
             .with_init_date("2026-08-01")
+            .with_methods([RecurringRegistration.METHOD_BLIK])
+            .with_terms_version("2026-09")
         )
     )
 
@@ -170,7 +176,7 @@ def run() -> dict[str, Any]:
             TransactionType.CARD_RECURRING,
             ReturnUrls("https://shop.test/ok", "https://shop.test/fail", "https://shop.test/ipn"),
         )
-        .with_register_blik_alias(BlikAliasRegistration("Moj alias", "PAYID"))
+        .with_register_blik_alias(BlikAliasRegistration("Moj alias", "UID"))
         .with_card_recurring(
             CardRecurringRegistration.create("Mandat")
             .with_frequency("MONTHLY")
@@ -210,10 +216,10 @@ def run() -> dict[str, Any]:
     dpay.blik.alias("a-1")
 
     recorder.queue_json(200, {"data": {}})
-    dpay.blik.unregister_alias("a-1", "PAYID", "user request")
+    dpay.blik.unregister_alias("a-1", "UID", "user request")
 
-    recorder.queue_json(200, {"data": {"alias_value": "a-1"}})
-    dpay.blik.recurring_status("a-1")
+    recorder.queue_json(200, {"data": {"alias": "a-1"}})
+    dpay.recurring.status("a-1")
 
     recorder.queue_text(200, "-----BEGIN PUBLIC KEY-----\nAAA\n-----END PUBLIC KEY-----\n")
     dpay.cards.public_key()
@@ -253,6 +259,58 @@ def run() -> dict[str, Any]:
 
     recorder.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
     dpay.cards.apple_pay("tx-1", ApplePayRequest.pay("ap-token", device).with_channel_id(91))
+
+    recorder.queue_json(
+        200, {"error": False, "msg": "Internal processing", "status": True, "transactionId": "tx-4"}
+    )
+    dpay.payments.register(
+        RegisterPaymentRequest.create(
+            Money.pln(4999),
+            TransactionType.TRANSFERS,
+            ReturnUrls("https://shop.test/ok", "https://shop.test/fail"),
+        )
+        .with_recurring_alias("SUB-1")
+        .with_client_context("UA/1.0", "10.0.0.1")
+        .with_description("Abonament 10/2026")
+        .with_webhook(
+            WebhookTarget.create("https://shop.test/webhooks", ["payment.succeeded", "payment.failed"])
+        )
+        .with_reference("order-77")
+    )
+
+    recorder.queue_json(
+        200,
+        {"status": "success", "data": {"transactionId": "tx-4", "retry": {"status": "pending", "count": 1}}},
+    )
+    dpay.recurring.retry("tx-4")
+
+    recorder.queue_json(200, {"status": "success", "data": {"alias": "SUB-1", "status": "UNREGISTERED"}})
+    dpay.recurring.cancel("SUB-1", "Rezygnacja")
+
+    recorder.queue_json(200, {"status": "success", "refund": True})
+    dpay.refunds.create(
+        "tx-1",
+        Money.pln(500),
+        "reklamacja",
+        WebhookTarget.create("https://shop.test/webhooks/refunds", ["refund.succeeded", "refund.failed"]),
+    )
+
+    recorder.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
+    dpay.cards.capture(
+        "tx-1",
+        Money.pln(1500),
+        WebhookTarget.create("https://shop.test/webhooks/captures", ["payment.captured"]),
+    )
+
+    recorder.queue_json(
+        200, {"status": "success", "data": [], "has_more": False, "next_starting_after": None}
+    )
+    dpay.events.list(
+        types=["payment.succeeded", "refund.failed"],
+        created_from="2026-09-01T00:00:00Z",
+        limit=10,
+        timestamp=1784700000,
+    )
 
     out["calls"] = [
         {"method": call.method, "url": call.url, "headers": call.headers, "body": call.body}

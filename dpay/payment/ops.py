@@ -19,15 +19,17 @@ def _string_field(body: dict[str, Any], key: str) -> str:
 
 def register(service: str, checksum: ChecksumCalculator, request: RegisterPaymentRequest) -> Operation:
     body = request.to_api(service)
-    body["checksum"] = checksum.secret_second(
-        service,
-        [
-            _string_field(body, "value"),
-            _string_field(body, "url_success"),
-            _string_field(body, "url_fail"),
-            _string_field(body, "url_ipn"),
-        ],
-    )
+    # Without url_ipn its segment stays empty: sha256(service|hash|value|url_success|url_fail|)
+    fields = [
+        _string_field(body, "value"),
+        _string_field(body, "url_success"),
+        _string_field(body, "url_fail"),
+        _string_field(body, "url_ipn"),
+    ]
+    # A recurring charge binds the checksum to the customer's alias
+    if body.get("recurring_alias") is not None:
+        fields.append(_string_field(body, "recurring_alias"))
+    body["checksum"] = checksum.secret_second(service, fields)
     return Operation(
         "POST",
         base_urls.API_PAYMENTS,
@@ -46,7 +48,7 @@ def _parse_register(response: ApiResponse) -> RegisteredPayment:
 
 def details(service: str, checksum: ChecksumCalculator, transaction_id: str) -> Operation:
     body: dict[str, Any] = {"service": service, "transaction_id": transaction_id}
-    body["checksum"] = checksum.ordered_body(list(body.values()))
+    body["checksum"] = checksum.ordered_body(body)
     return Operation(
         "POST",
         base_urls.PANEL,

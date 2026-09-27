@@ -19,7 +19,7 @@ def for_service(service: str, checksum: ChecksumCalculator, timestamp: int | Non
         "service": service,
         "timestamp": int(time.time()) if timestamp is None else timestamp,
     }
-    body["checksum"] = checksum.ordered_body(list(body.values()))
+    body["checksum"] = checksum.ordered_body(body)
     return Operation("POST", base_urls.PANEL, "/api/v1/pbl/banks", _parse_banks, body)
 
 

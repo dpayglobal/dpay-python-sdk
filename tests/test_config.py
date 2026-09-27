@@ -80,7 +80,16 @@ def test_resolve_rejects_unknown_host() -> None:
 
 def test_client_exposes_all_services() -> None:
     client = DPayClient(service="s", secret_hash="h", http_client=MockHttpClient())
-    for name in ("payments", "refunds", "banks", "blik", "cards", "payouts"):
+    for name in ("payments", "refunds", "banks", "blik", "cards", "payouts", "recurring", "events"):
+        assert getattr(client, name) is not None
+
+
+def test_async_client_exposes_the_same_services() -> None:
+    from dpay.aio import AsyncDPayClient
+    from dpay.testing import MockAsyncHttpClient
+
+    client = AsyncDPayClient(service="s", secret_hash="h", http_client=MockAsyncHttpClient())
+    for name in ("payments", "refunds", "banks", "blik", "cards", "payouts", "recurring", "events"):
         assert getattr(client, name) is not None
 
 

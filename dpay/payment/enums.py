@@ -9,8 +9,6 @@ TransactionTypeValue = Literal[
     "dcb_gateway",
     "card_auth",
     "mb_way_direct",
-    "bizum_direct",
-    "blik_recurring",
     "card_recurring",
 ]
 
@@ -24,8 +22,6 @@ class TransactionType:
     DCB_GATEWAY = "dcb_gateway"
     CARD_AUTH = "card_auth"
     MB_WAY_DIRECT = "mb_way_direct"
-    BIZUM_DIRECT = "bizum_direct"
-    BLIK_RECURRING = "blik_recurring"
     CARD_RECURRING = "card_recurring"
 
     ALL = (
@@ -33,8 +29,6 @@ class TransactionType:
         DCB_GATEWAY,
         CARD_AUTH,
         MB_WAY_DIRECT,
-        BIZUM_DIRECT,
-        BLIK_RECURRING,
         CARD_RECURRING,
     )
 

@@ -59,14 +59,87 @@ async def test_all_services_are_available(
     async_transport.queue_json(200, {"data": {}})
     await async_client.blik.unregister_alias("a-1")
 
-    async_transport.queue_json(200, {"data": {"alias_value": "a-1"}})
-    assert (await async_client.blik.recurring_status("a-1")).alias_value == "a-1"
+    async_transport.queue_json(200, {"status": "success", "data": {"alias": "SUB-1", "status": "ACTIVE"}})
+    assert (await async_client.recurring.status("SUB-1")).is_active
+
+    async_transport.queue_json(
+        200,
+        {"status": "success", "data": {"transactionId": "tx-4", "retry": {"status": "pending", "count": 1}}},
+    )
+    assert (await async_client.recurring.retry("tx-4")).is_pending
+
+    async_transport.queue_json(
+        200, {"status": "success", "data": {"alias": "SUB-1", "status": "UNREGISTERED"}}
+    )
+    assert await async_client.recurring.cancel("SUB-1") == "UNREGISTERED"
+
+    async_transport.queue_json(200, {"status": "success", "data": [], "has_more": False})
+    assert (await async_client.events.list(timestamp=1790503500)).data == []
 
     async_transport.queue_text(200, " key ")
     assert await async_client.cards.public_key() == "key"
 
     async_transport.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
     assert (await async_client.cards.capture("tx-1", Money.pln(1))).is_success
+
+
+async def test_new_operations_match_sync_wire_format(
+    async_client: AsyncDPayClient, async_transport: MockAsyncHttpClient
+) -> None:
+    from dpay import DPayClient, WebhookTarget
+    from dpay.testing import MockHttpClient
+
+    sync_transport = MockHttpClient()
+    sync_client = DPayClient(service=SERVICE, secret_hash=SECRET, http_client=sync_transport)
+    captured = WebhookTarget.create("https://shop.test/webhooks", ["payment.captured"])
+    refunded = WebhookTarget.create("https://shop.test/webhooks", ["refund.failed"])
+    card_ok = {"success": True, "message": {"redirectType": "SUCCESS"}}
+    for transport in (sync_transport, async_transport):
+        transport.queue_json(200, card_ok)
+        transport.queue_json(200, card_ok)
+        transport.queue_json(200, {"status": "success", "refund": True})
+        for _ in range(4):
+            transport.queue_json(200, {"status": "success", "data": {}})
+
+    sync_client.cards.capture("tx-1", Money.pln(1500), captured)
+    sync_client.cards.cancel("tx-1", Money.pln(100))
+    sync_client.refunds.create("tx-1", Money.pln(500), None, refunded)
+    sync_client.recurring.status("SUB-1")
+    sync_client.recurring.retry("tx-4")
+    sync_client.recurring.cancel("SUB-1", "Rezygnacja")
+    sync_client.events.list(types=["payment.succeeded"], limit=5, timestamp=1790503500)
+
+    await async_client.cards.capture("tx-1", Money.pln(1500), captured)
+    await async_client.cards.cancel("tx-1", Money.pln(100))
+    await async_client.refunds.create("tx-1", Money.pln(500), None, refunded)
+    await async_client.recurring.status("SUB-1")
+    await async_client.recurring.retry("tx-4")
+    await async_client.recurring.cancel("SUB-1", "Rezygnacja")
+    await async_client.events.list(types=["payment.succeeded"], limit=5, timestamp=1790503500)
+
+    assert [(r.url, r.body) for r in async_transport.requests] == [
+        (r.url, r.body) for r in sync_transport.requests
+    ]
+
+
+async def test_events_iterate_pages_asynchronously(
+    async_client: AsyncDPayClient, async_transport: MockAsyncHttpClient
+) -> None:
+    first = "evt_01k6a8q2m4pz7h8c3v5n9t2x6y"
+    second = "evt_01k6a8q2m4pz7h8c3v5n9t2x6a"
+    async_transport.queue_json(
+        200,
+        {"status": "success", "data": [{"id": first}], "has_more": True, "next_starting_after": first},
+    )
+    async_transport.queue_json(
+        200,
+        {"status": "success", "data": [{"id": second}], "has_more": False, "next_starting_after": second},
+    )
+
+    ids = [event.id async for event in async_client.events.iterate(limit=1)]
+
+    assert ids == [first, second]
+    assert async_transport.last_request_body["starting_after"] == first
 
 
 async def test_card_endpoints(async_client: AsyncDPayClient, async_transport: MockAsyncHttpClient) -> None:

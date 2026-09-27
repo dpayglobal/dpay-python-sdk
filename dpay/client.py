@@ -12,8 +12,10 @@ from dpay.http.base import HttpClient
 from dpay.http.urllib_client import UrllibHttpClient
 from dpay.payment.service import PaymentService
 from dpay.payout.service import PayoutService
+from dpay.recurring.service import RecurringService
 from dpay.refund.service import RefundService
 from dpay.version import SDK_VERSION
+from dpay.webhook.service import EventService
 
 
 class DPayClient:
@@ -46,3 +48,5 @@ class DPayClient:
         self.blik = BlikService(api)
         self.cards = CardService(api)
         self.payouts = PayoutService(api)
+        self.recurring = RecurringService(api)
+        self.events = EventService(api)

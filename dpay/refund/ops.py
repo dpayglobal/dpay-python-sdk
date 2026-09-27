@@ -9,6 +9,8 @@ from dpay._internal.operation import Operation, decode_dict_or_fail
 from dpay.http.models import ApiResponse
 from dpay.money import Money
 from dpay.refund.models import Refund, RefundAvailability
+from dpay.webhook.event_type import WebhookEventType
+from dpay.webhook.target import WebhookTarget
 
 _AVAILABILITY_OUTCOMES = (200, 400, 402, 406, 409, 410, 411)
 
@@ -19,13 +21,17 @@ def _signed_body(
     transaction_id: str,
     amount: Money | None,
     reason: str | None,
+    webhook: WebhookTarget | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {"service": service, "transaction_id": transaction_id}
     if amount is not None:
         body["value"] = amount.to_decimal()
     if reason is not None:
         body["reason"] = reason
-    body["checksum"] = checksum.ordered_body(list(body.values()))
+    if webhook is not None:
+        body["webhook"] = webhook.to_api()
+    # Values of the whole body in the order sent, the webhook object flattened (url, events...)
+    body["checksum"] = checksum.ordered_body(body)
     return body
 
 
@@ -35,13 +41,16 @@ def create(
     transaction_id: str,
     amount: Money | None,
     reason: str | None,
+    webhook: WebhookTarget | None = None,
 ) -> Operation:
+    if webhook is not None:
+        webhook.assert_events_allowed(WebhookEventType.REFUND, "a refund")
     return Operation(
         "POST",
         base_urls.PANEL,
         "/api/v1/pbl/refund",
         lambda response: Refund.from_api(decode_dict_or_fail(response)),
-        _signed_body(service, checksum, transaction_id, amount, reason),
+        _signed_body(service, checksum, transaction_id, amount, reason, webhook),
     )
 
 

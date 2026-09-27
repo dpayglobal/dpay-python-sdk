@@ -33,6 +33,7 @@ class ApiError(DPayError):
         error_code: str | None = None,
         field_errors: dict[str, list[str]] | None = None,
         raw_body: str = "",
+        reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -40,6 +41,8 @@ class ApiError(DPayError):
         self.error_code = error_code
         self.field_errors: dict[str, list[str]] = field_errors or {}
         self.raw_body = raw_body
+        # Detailed reason next to the code, e.g. ``https_required`` for WEBHOOK_URL_INVALID.
+        self.reason = reason
 
 
 class AuthenticationError(ApiError):
@@ -87,9 +90,12 @@ class PaymentRejectedError(ApiError):
         field_errors: dict[str, list[str]] | None = None,
         raw_body: str = "",
         transaction_id: str | None = None,
+        error_description: str | None = None,
     ) -> None:
         super().__init__(message, http_status, error_code, field_errors, raw_body)
         self.transaction_id = transaction_id
+        # Provider's description of the decline, when it sent one.
+        self.error_description = error_description
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> PaymentRejectedError:
@@ -99,6 +105,7 @@ class PaymentRejectedError(ApiError):
         additional = additional if isinstance(additional, dict) else {}
         raw_code = additional.get("error")
         error_code = raw_code if isinstance(raw_code, str) else None
+        raw_description = additional.get("error_description")
         transaction_id = data.get("transactionId")
         return cls(
             message,
@@ -107,6 +114,7 @@ class PaymentRejectedError(ApiError):
             {},
             php_json_encode(data),
             php_strval(transaction_id) if is_scalar(transaction_id) else None,
+            raw_description if isinstance(raw_description, str) else None,
         )
 
 

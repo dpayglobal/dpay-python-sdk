@@ -4,16 +4,10 @@ from typing import Any
 
 from dpay._internal import base_urls
 from dpay._internal.checksum import ChecksumCalculator
-from dpay._internal.operation import Operation, decode_dict_or_fail
+from dpay._internal.operation import Operation, decode_dict_or_fail, decode_envelope_or_fail
 from dpay.blik.enums import BlikAliasType
-from dpay.blik.models import BlikAlias, BlikRecurringStatus
+from dpay.blik.models import BlikAlias
 from dpay.http.models import ApiResponse
-
-
-def _envelope(response: ApiResponse) -> dict[str, Any]:
-    data = decode_dict_or_fail(response)
-    inner = data.get("data")
-    return inner if isinstance(inner, dict) else {}
 
 
 def alias(service: str, checksum: ChecksumCalculator, alias_value: str, alias_type: str) -> Operation:
@@ -28,7 +22,7 @@ def alias(service: str, checksum: ChecksumCalculator, alias_value: str, alias_ty
         "POST",
         base_urls.API_PAYMENTS,
         "/api/v1_0/payments/blik/aliases",
-        lambda response: BlikAlias.from_api(_envelope(response)),
+        lambda response: BlikAlias.from_api(decode_envelope_or_fail(response)),
         body,
     )
 
@@ -61,15 +55,3 @@ def unregister_alias(
 def _discard(response: ApiResponse) -> None:
     decode_dict_or_fail(response)
     return None
-
-
-def recurring_status(service: str, checksum: ChecksumCalculator, alias_value: str) -> Operation:
-    body: dict[str, Any] = {"service": service, "alias_value": alias_value}
-    body["checksum"] = checksum.secret_second(service, [alias_value])
-    return Operation(
-        "POST",
-        base_urls.API_PAYMENTS,
-        "/api/v1_0/payments/blik/recurring/status",
-        lambda response: BlikRecurringStatus.from_api(_envelope(response)),
-        body,
-    )

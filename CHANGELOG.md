@@ -6,6 +6,65 @@ wersjonowanie zgodne z [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+## [0.2.0] - wydanie razem z wdrożeniem API dpay
+
+Wersja wymaga API dpay z tym samym wydaniem (wspólne API płatności cyklicznych, suma kontrolna capture
+i anulowania kart). Zmiany łamiące zgodność są oznaczone jako **BREAKING**. Port SDK PHP 0.2.0 -
+parytet potwierdzają golden vectors wygenerowane z SDK PHP 0.2.0.
+
+### Added
+
+- `client.recurring` (`RecurringService`, `AsyncRecurringService`): `status()`, `retry()` i `cancel()`
+  płatności cyklicznej (`/api/v1_0/payments/recurring/*`), modele `RecurringStatus`,
+  `RecurringRegistrationInfo`, `RecurringRetryResult`.
+- `RegisterPaymentRequest.with_recurring_registration(RecurringRegistration)` - rejestracja płatności
+  cyklicznej (modele O, A i M, `terms_url` wymagany) z kodem BLIK klienta.
+- `RegisterPaymentRequest.with_recurring_alias()` - obciążenie zapisanej płatności cyklicznej bez kodu BLIK;
+  alias wchodzi do sumy kontrolnej. `with_client_context()` - opcjonalne IP i przeglądarka klienta
+  przy obciążeniu.
+- Webhooki: `WebhookVerifier.construct_event()` i `verify()` (Standard Webhooks, podpis `v1`, tolerancja
+  czasu, kilka podpisów i sekretów w czasie rotacji), `WebhookEvent`, `WebhookEventType`.
+- `client.events` (`EventService`, `AsyncEventService`): historia zdarzeń z filtrami, `list()` i `iterate()`
+  po stronach.
+- `WebhookTarget` - własny adres zdarzeń w rejestracji płatności (`with_webhook()`), zwrocie
+  (`refunds.create(..., webhook=...)`) i capture karty (`cards.capture(..., webhook)`);
+  `RegisterPaymentRequest.with_reference()`.
+- `ApiError.reason`, `PaymentRejectedError.error_description`, `RegisteredPayment.recurring_alias`
+  i `RegisteredPayment.recurring_methods`.
+- `tests/fixtures/api_vectors.json` - wspólne wektory sum kontrolnych i podpisów webhooków wszystkich SDK dpay.
+
+### Changed
+
+- **BREAKING** `cards.capture()` i `cards.cancel()` wysyłają `service` i sumę
+  `sha256(operacja|service|transaction_id|amount|hash)` - API odrzuca je bez sumy (401).
+- **BREAKING** `ReturnUrls`: adres IPN jest opcjonalny (`ipn: str | None = None`); bez niego `url_ipn`
+  nie jest wysyłany, a IPN nie przychodzi (wynik przychodzi webhookiem).
+- Mapowanie błędów czyta kod błędu z pola `code` (np. `CHECKSUM_REQUIRED`, `WEBHOOK_URL_INVALID`),
+  potem z `errorcode`.
+- Suma kontrolna API PBL (`ordered_body`) liczona jest z całego body i spłaszcza obiekty zagnieżdżone
+  (np. `webhook`) w kolejności wysyłki.
+
+Świadome różnice wobec SDK PHP:
+
+- `events.list()` i `events.iterate()` przyjmują filtry jako argumenty nazwane (`types`, `created_from`,
+  `created_to`, `starting_after`, `limit`) zamiast tablicy; w kliencie asynchronicznym `iterate()`
+  jest asynchronicznym generatorem
+- `WebhookVerifier` przyjmuje surowe body jako `bytes` albo `str`, a nagłówki z dowolnego obiektu
+  z metodą `items()` (także nazwy i wartości `bytes` z ASGI)
+
+### Removed
+
+- **BREAKING** `blik.recurring_status()`, `BlikRecurringRegistration`, `BlikRecurringStatus`,
+  `BlikRecurringRegistrationInfo` i `RegisterPaymentRequest.with_register_blik_recurring_alias()` - API
+  usunęło te endpointy i pole; użyj `client.recurring` i `with_recurring_registration()`.
+- **BREAKING** `BlikAliasType.PAYID` (aliasy OneClick są tylko `UID`), `TransactionType.BLIK_RECURRING`
+  i `TransactionType.BIZUM_DIRECT` (API odrzuca je kodem 422).
+
+### Deprecated
+
+- `IpnType.CAPTURE`, `IpnEvent.is_capture` i `IpnEvent.capture_payment_id` - dpay nie wysyła już IPN
+  typu `capture`; użyj zdarzenia `payment.captured`.
+
 ## [0.1.1] - 2026-07-23
 
 ### Fixed
@@ -56,6 +115,7 @@ poziomu. Zachowaliśmy krótki import dla spójności z SDK PHP i lepszego DX -
 tamten pakiet wymaga zależności ze składnią Pythona 2 i nie da się go zaimportować
 na Pythonie 3.10+, więc realne ryzyko współistnienia jest znikome.
 
-[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dpayglobal/dpay-python-sdk/releases/tag/v0.1.0
