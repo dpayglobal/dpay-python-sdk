@@ -20,6 +20,7 @@ from dpay import (
     NotFoundError,
     Payer,
     PaymentRejectedError,
+    RateLimitError,
     RegisteredTransaction,
     RegisterPaymentRequest,
     ReturnUrls,
@@ -285,7 +286,7 @@ def test_payout_details_states(client: DPayClient, transport: MockHttpClient) ->
             "fee": 2.0,
             "gross": 102.5,
             "direct_settlement": 1,
-            "declined": "1",
+            "declined": 1,
             "receiver": {"nrb": "PL61", "amount": 10.0, "receiverName": "Jan"},
         },
     )
@@ -581,6 +582,35 @@ def test_availability_without_refund_key_raises(client: DPayClient, transport: M
     transport.queue_json(422, {"message": "The given data was invalid.", "errors": {"value": ["x"]}})
     with pytest.raises(InvalidRequestError):
         client.refunds.check_availability("TX-1")
+
+
+def test_availability_is_decided_by_the_body_not_by_the_status(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    # Laravel validation (422) and ThrottlePaymentServiceApi (429) bodies carry no ``refund`` key - they raise
+    transport.queue_json(
+        422,
+        {
+            "message": "The service field is required.",
+            "errors": {"service": ["The service field is required."]},
+        },
+    )
+    with pytest.raises(InvalidRequestError) as invalid:
+        client.refunds.check_availability("TX-1")
+    assert invalid.value.http_status == 422
+    transport.queue_json(
+        429,
+        {"status": "error", "message": "Too Many Requests", "error": "Too Many Requests"},
+        {"Retry-After": "12"},
+    )
+    with pytest.raises(RateLimitError) as limited:
+        client.refunds.check_availability("TX-1")
+    assert limited.value.retry_after == 12
+    # Any other 4xx with the ``refund`` key is an answer
+    transport.queue_json(422, {"status": "error", "refund": False, "message": "Refund not possible"})
+    availability = client.refunds.check_availability("TX-1")
+    assert availability.is_available is False
+    assert availability.http_status == 422
 
 
 def test_availability_checksum_401_raises_but_business_401_answers(

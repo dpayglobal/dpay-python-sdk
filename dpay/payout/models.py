@@ -23,8 +23,9 @@ def _money(raw: dict[str, Any], key: str, currency: str = Currency.PLN) -> Money
 
 
 def _flag(raw: dict[str, Any], key: str) -> bool:
+    # The API sends its 0/1 flags as JSON integers - only the integer 1 is true (not True, 1.0 or "1")
     value = raw.get(key)
-    return php_int(value) == 1 if is_scalar(value) else False
+    return is_php_int(value) and value == 1
 
 
 def _numeric_int(raw: dict[str, Any], key: str, default: int) -> int:
@@ -119,7 +120,8 @@ class PayoutDetails:
 
     @property
     def is_paysafecard(self) -> bool:
-        """Paysafecard payout (``paysafecard`` = 1, present only for regular, non-direct settlements)."""
+        """Paysafecard payout (``paysafecard`` is the JSON integer 1; sent only for regular, non-direct
+        settlements)."""
         return _flag(self.raw, "paysafecard")
 
 
@@ -213,7 +215,8 @@ class PayoutListItem:
 
     @property
     def is_declined(self) -> bool:
-        return _numeric_int(self.raw, "declined", 0) == 1
+        """``declined`` is the JSON integer 1."""
+        return _flag(self.raw, "declined")
 
 
 class PayoutPage:

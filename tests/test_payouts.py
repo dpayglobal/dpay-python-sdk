@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any
 
 import pytest
@@ -202,12 +203,16 @@ def test_iterate_stops_on_an_empty_page(transport: MockHttpClient) -> None:
     ("filters", "page", "per_page", "message"),
     [
         ({"state": 2}, None, None, 'Invalid payout state "2"'),
-        ({"state": "1"}, None, None, 'Invalid payout state "1"'),
-        ({"state": True}, None, None, 'Invalid payout state "True"'),
+        ({"state": "1"}, None, None, "state must be an integer"),
+        ({"state": True}, None, None, "state must be an integer"),
+        ({"state": 1.0}, None, None, "state must be an integer"),
         ({"type": "instant"}, None, None, 'Invalid payout type "instant"'),
+        ({"type": 1}, None, None, "type must be a string"),
         ({"date_from": " "}, None, None, "date_from must not be empty"),
         ({"date_to": "\t\n"}, None, None, "date_to must not be empty"),
+        ({"date_from": "\u00a0\n"}, None, None, "date_from must not be empty"),
         ({"date_from": 20260801}, None, None, "date_from must be a string"),
+        ({"date_to": date(2026, 8, 31)}, None, None, "date_to must be a string"),
         ({}, 0, None, "page must be at least 1"),
         ({}, None, 201, "per_page must be between 1 and 200"),
         ({}, None, 0, "per_page must be between 1 and 200"),
@@ -216,10 +221,14 @@ def test_iterate_stops_on_an_empty_page(transport: MockHttpClient) -> None:
         "state",
         "state-string",
         "state-bool",
+        "state-float",
         "type",
+        "type-int",
         "empty-date",
         "blank-date",
+        "unicode-blank-date",
         "date-not-string",
+        "date-object",
         "page-0",
         "per-page-201",
         "per-page-0",

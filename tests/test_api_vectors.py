@@ -11,6 +11,7 @@ import pytest
 
 from dpay import DPayClient, IpnVerifier, PayoutState, SignatureVerificationError
 from dpay._internal.checksum import ChecksumCalculator
+from dpay._internal.server_trim import server_trim, trim_strings
 from dpay.testing import MockHttpClient
 from tests import api_vectors
 
@@ -47,6 +48,27 @@ def test_operation_vectors(name: str) -> None:
 def test_ordered_body_vectors(name: str) -> None:
     item = api_vectors.vector(api_vectors.ORDERED_BODY, name)
     assert CALCULATOR.ordered_body(item["body"]) == item["checksum"]
+
+
+def test_server_trim_vectors_are_complete() -> None:
+    assert len(api_vectors.SERVER_TRIM_STRINGS) == 8
+    assert len(api_vectors.SERVER_TRIM_BODIES) == 4
+
+
+@pytest.mark.parametrize("name", _names(api_vectors.SERVER_TRIM_STRINGS))
+def test_server_trim_string_vectors(name: str) -> None:
+    item = api_vectors.vector(api_vectors.SERVER_TRIM_STRINGS, name)
+    assert server_trim(item["input"]) == item["trimmed"]
+
+
+@pytest.mark.parametrize("name", _names(api_vectors.SERVER_TRIM_BODIES))
+def test_server_trim_body_vectors(name: str) -> None:
+    item = api_vectors.vector(api_vectors.SERVER_TRIM_BODIES, name)
+    body = trim_strings(item["input"])
+    assert body == item["body"]
+    assert list(body) == list(item["body"])
+    assert CALCULATOR.ordered_body(body) == item["checksum"]
+    assert CALCULATOR.ordered_body(item["input"]) != item["checksum"]
 
 
 @pytest.mark.parametrize("name", _names(api_vectors.IPN))

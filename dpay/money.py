@@ -8,7 +8,8 @@ from dpay._internal.php import is_php_float, is_php_int, php_round
 from dpay.currency import Currency
 from dpay.exceptions import DPayValueError
 
-_DECIMAL = re.compile(r"^(-?)(\d+)(?:\.(\d{1,2}))?$")
+# Whole string (fullmatch), ASCII digits - ``\d`` matches every Unicode digit and ``$`` a final "\n"
+_DECIMAL = re.compile(r"(-?)([0-9]+)(?:\.([0-9]{1,2}))?")
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,7 @@ class Money:
 
 
 def _parse_decimal(decimal: str) -> int | None:
-    match = _DECIMAL.match(decimal)
+    match = _DECIMAL.fullmatch(decimal)
     if match is None:
         return None
     fraction = (match.group(3) or "").ljust(2, "0")

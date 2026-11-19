@@ -9,8 +9,8 @@ from dpay.money import Money
 from dpay.payment.enums import TransactionStatus
 
 _HTTP_URL = re.compile(r"^https?://")
-# PHP preg_match('/^-?\d+$/') - ``$`` also matches before a final newline
-_INTEGER_STRING = re.compile(r"^-?\d+$", re.ASCII)
+# PHP preg_match('/^-?\d+\z/') - the whole string (fullmatch), ASCII digits
+_INTEGER_STRING = re.compile(r"-?[0-9]+")
 
 
 def _string_or_empty(data: dict[str, Any], key: str) -> str:
@@ -304,7 +304,7 @@ class Transaction:
         value = self._transaction().get(key)
         if isinstance(value, int) and is_php_int(value):
             return value
-        if isinstance(value, str) and _INTEGER_STRING.match(value) is not None:
+        if isinstance(value, str) and _INTEGER_STRING.fullmatch(value) is not None:
             return int(value)
         return None
 

@@ -16,8 +16,9 @@ i parsowanie odpowiedzi) oraz wspólne `tests/fixtures/api_vectors.json`.
 
 - **BREAKING** `refunds.check_availability()` zwraca `RefundAvailability` (niedostępny) zamiast rzucać wyjątek
   dla każdej odpowiedzi 4xx z kluczem `refund`, w tym 404 (transakcja nie istnieje, wcześniej
-  `NotFoundError`) i 423 (zwrot przez BOK dpay). Przyczynę rozróżnia `http_status`. Nadal rzucają:
-  401 "Unauthorized request" (`AuthenticationError`), 422, 429 i 5xx.
+  `NotFoundError`) i 423 (zwrot przez BOK dpay). Przyczynę rozróżnia `http_status`. Rozstrzyga treść
+  odpowiedzi, nie lista kodów. Nadal rzucają: 401 "Unauthorized request" (`AuthenticationError`), każda
+  odpowiedź bez klucza `refund` - tak API odpowiada na 422 (walidacja) i 429 (limit zapytań) - oraz każde 5xx.
 - **BREAKING** Waluta kwoty trafia do `currency_code`: `Money` w walucie innej niż PLN wysyła `currency_code`
   bez `with_currency_code()` (wcześniej np. `Money.of(49900, "CZK")` rejestrowało 499.00 w walucie domyślnej
   serwisu). `with_currency_code()` i `with_phone_number()` rzucają `DPayValueError`, gdy waluta różni się
@@ -38,10 +39,11 @@ i parsowanie odpowiedzi) oraz wspólne `tests/fixtures/api_vectors.json`.
   odmowy karty oraz `ApiError.card_error` i `ApiError.transaction_id` z pól `cardError` i `transactionId`
   błędu Payments API (np. odrzucone pobranie na zapisanej karcie).
 - `client.payouts.list()` i `iterate()` (`POST /api/v1/pbl/withdraws`, filtry `date_from`, `date_to`,
-  `state`, `type`, strony do 200) oraz `details_full()` (`POST /api/v1/pbl/withdraws/details/full`: nagłówek,
+  `state`, `type`, strony do 200; nieznany filtr lub wartość złego typu rzuca `DPayValueError`) oraz `details_full()` (`POST /api/v1/pbl/withdraws/details/full`: nagłówek,
   sumy całego rozliczenia i pozycje z `payment_id`, `custom`, `ipksef`, strony do 500); modele `PayoutPage`,
   `PayoutListItem`, `PayoutSettlement`, `SettlementPosition`, `PageMeta`, `PayoutState`, `PayoutType`.
-- `PayoutDetails.currency` (z `currency_code`, PLN gdy go brak), `export_date` i `is_paysafecard`.
+- `PayoutDetails.currency` (z `currency_code`, PLN gdy go brak), `export_date` i `is_paysafecard`
+  (prawda tylko dla liczby całkowitej JSON `1`, jak `PayoutListItem.is_declined`).
 - `refunds.create()`: opcjonalny argument `message_id` - nagłówek `DigitalPayments-PSP-Message-ID`
   (tytuł przelewu `dpay.pl zwrot {message_id}`, poza sumą kontrolną), stała `RefundService.MESSAGE_ID_HEADER`.
 - `RegisteredPayment.multibanco` (`MultibancoReference`: encja, referencja, kwota, ważność)
@@ -56,8 +58,8 @@ i parsowanie odpowiedzi) oraz wspólne `tests/fixtures/api_vectors.json`.
   ApplePayMerchantSession z `redirectText` odpowiedzi APPLE_PAY_INIT).
 - `RateLimitError.reset` (nagłówek `X-RateLimit-Reset`), `Currency.USD` i `Currency.RON`,
   `PayoutPosition.is_valid_polish_iban()`.
-- `tests/fixtures/api_vectors.json`: wektory IPN transfer, dcb i alias_update oraz sum list i szczegółów
-  wypłat.
+- `tests/fixtures/api_vectors.json`: wektory IPN transfer, dcb i alias_update, sum list i szczegółów
+  wypłat oraz `server_trim` (przycinanie łańcuchów przez API panelu: wejście, wysłane body, suma kontrolna).
 
 ### Changed
 
@@ -74,14 +76,38 @@ i parsowanie odpowiedzi) oraz wspólne `tests/fixtures/api_vectors.json`.
   - `PayoutPosition`: IBAN `PL` + 26 cyfr z poprawną sumą kontrolną mod 97 (spacje i małe litery dozwolone)
     i kwota powyżej 0.
 - `ApiError.transaction_id` przeniesione z `PaymentRejectedError` do klasy bazowej (bez zmiany zachowania).
+- Pusty identyfikator transakcji w `refunds.create()`, `refunds.check_availability()` i `payments.details()`
+  rzuca `DPayValueError` (`transaction_id must not be empty`) zamiast wysyłać żądanie, które API odrzuca
+  kodem 422.
+
+### Fixed
+
+- Żądania API panelu (`/api/v1/pbl/*`: zwroty, `payments.details()`, `banks.for_service()`, wypłaty) wysyłają
+  i podpisują każdy łańcuch przycięty tak jak API (globalne `TrimStrings` Laravel 13, `Str::trim()`: białe znaki
+  ASCII, NUL, spacje Unicode i znaki niewidoczne, np. U+00A0, U+200B, U+FEFF - 65 punktów kodowych, nie
+  `str.strip()`) - wcześniej identyfikator transakcji, powód zwrotu, nazwa serwisu lub data filtra z takim
+  znakiem na brzegu kończyły się 401 "Unauthorized request". Powód, z którego nic nie zostaje, jest wysyłany
+  jako `""` (API liczy go jako pusty segment); pusta po przycięciu nazwa serwisu, identyfikator transakcji lub
+  data filtra rzucają `DPayValueError`. Żądania API płatności (`api-payments`) bez zmian.
+- Wzorce walidacji dopasowują cały ciąg (`re.fullmatch`) i tylko cyfry ASCII (`[0-9]` zamiast `\d`, które
+  w Pythonie dopasowuje każdą cyfrę Unicode) - `$` przepuszczał końcowe `"\n"`, a `\d` np. `"١٢٣"`: numer
+  karty, CVV, data ważności, daty `YYYY-MM-DD`, kwoty `Money`, kod waluty, kod BLIK, `partner_platform`, IBAN
+  wypłaty, email płatnika (także adres spoza ASCII, który odrzuca `FILTER_VALIDATE_EMAIL` w PHP) oraz liczby
+  w `Transaction.minimal_fee` i `permanent_fee` (`"30\n"` było czytane jako 30).
+- Liczby w odpowiedziach (`is_numeric` i rzutowanie na `int` jak w PHP 8: stronicowanie i pola wypłat,
+  `attempt` i `version` IPN, kursy DCC, pola banków i błędów) akceptują tylko cyfry ASCII i białe znaki PHP;
+  wcześniej `float()`/`int()` Pythona przyjmowały cyfry Unicode, `"1_0"`, `"nan"`, `"inf"` i spacje Unicode,
+  a np. `"²"` kończyło się `ValueError`. `"1e3"` daje 1000, a liczby poza zakresem 64-bitowym są obcinane
+  do granic, jak w PHP.
+- `PayoutDetails.is_direct_settlement` i `is_declined` oraz `PayoutListItem.is_declined` są prawdziwe tylko
+  dla liczby całkowitej JSON `1` (tak wysyła API) - wcześniej także np. dla `"1"` czy `True`.
 
 Świadome różnice wobec SDK PHP:
 
 - `payouts.list()` przyjmuje filtry jako słownik (`Mapping`), jak tablica w PHP; filtr z wartością `None`
-  jest pomijany, a data, która nie jest `str`, rzuca `DPayValueError` (w PHP `TypeError`); w kliencie
-  asynchronicznym `payouts.iterate()` jest asynchronicznym generatorem
-- identyfikator zwrotu z końcowym znakiem nowej linii odrzuca komunikat "Refund message ID must be non-empty
-  printable ASCII" (w PHP ten sam przypadek kończy się komunikatem "Invalid request header")
+  jest pomijany; w kliencie asynchronicznym `payouts.iterate()` jest asynchronicznym generatorem
+- identyfikator transakcji, który nie jest `str`, rzuca `DPayValueError` (`transaction_id must be a string`;
+  w PHP `TypeError`)
 
 ## [0.2.0] - wydanie razem z wdrożeniem API dpay
 

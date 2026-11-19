@@ -7,6 +7,7 @@ from dpay._internal import base_urls
 from dpay._internal.checksum import ChecksumCalculator
 from dpay._internal.error_mapper import map_error
 from dpay._internal.operation import Operation, decode_dict_or_fail
+from dpay._internal.server_trim import required, sign_panel_body
 from dpay.exceptions import DPayValueError
 from dpay.http.models import ApiResponse
 from dpay.money import Money
@@ -27,16 +28,20 @@ def _signed_body(
     reason: str | None,
     webhook: WebhookTarget | None = None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {"service": service, "transaction_id": transaction_id}
+    body: dict[str, Any] = {
+        "service": required(service, "service"),
+        "transaction_id": required(transaction_id, "transaction_id"),
+    }
     if amount is not None:
         body["value"] = amount.to_decimal()
     if reason is not None:
+        # Blank after trimming is sent as "" - the API turns it into null and hashes an empty segment
         body["reason"] = reason
     if webhook is not None:
         body["webhook"] = webhook.to_api()
-    # Values of the whole body in the order sent, the webhook object flattened (url, events...)
-    body["checksum"] = checksum.ordered_body(body)
-    return body
+    # Strings trimmed like the API trims them, then the values of the whole body in the order sent, the
+    # webhook object flattened (url, events...)
+    return sign_panel_body(checksum, body)
 
 
 def create(
@@ -95,8 +100,9 @@ def _parse_availability(response: ApiResponse) -> RefundAvailability:
 
 
 def _is_outcome(status: int, data: dict[str, Any]) -> bool:
-    # 200 and every 4xx business refusal (400, 402, 404, 406, 409, 410, 411, 423...) carrying ``refund``;
-    # a 401 only when it is not the checksum error
+    # Decided by the body (``refund`` key, checked by the caller), not by a list of statuses: 200 and every
+    # 4xx - today 400, 402, 404, 406, 409, 410, 411, 423 and a business 401; a 401 only when it is not the
+    # checksum error. 422 and 429 raise because the API sends them without ``refund``; 5xx always raises.
     if status == 401:
         return data.get("message") != "Unauthorized request"
     return status == 200 or 400 <= status < 500

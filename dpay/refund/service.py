@@ -28,7 +28,9 @@ class RefundService:
 
         An accepted refund is not a finished one - its outcome comes as a ``refund.succeeded`` or
         ``refund.failed`` event. The optional webhook target receives the events of this refund and is
-        part of the checksum.
+        part of the checksum. The transaction ID, reason and webhook URL are sent and signed trimmed, as the
+        API trims them before it verifies the checksum; a reason that is blank after trimming is sent as
+        ``""`` and a blank transaction ID raises ``DPayValueError``.
 
         ``message_id`` - your own refund identifier, sent in the ``DigitalPayments-PSP-Message-ID`` header
         (not part of the checksum): the refund transfer title becomes ``dpay.pl zwrot {message_id}`` and
@@ -44,10 +46,12 @@ class RefundService:
     ) -> RefundAvailability:
         """Checks whether the refund is possible.
 
-        Every answer that carries the ``refund`` key - HTTP 200 and the business refusals 400, 402,
-        404 (transaction does not exist), 406, 409, 410, 411, 423 and a business 401 - is returned as
-        ``RefundAvailability`` (``http_status`` tells the reason apart). An invalid checksum (401
-        "Unauthorized request"), validation errors (422), rate limits and server errors raise.
+        The answer is decided by the body, not by a list of statuses: HTTP 200 and every 4xx whose JSON
+        body carries the ``refund`` key are returned as ``RefundAvailability`` (``http_status`` tells the
+        reason apart) - today the business refusals 400, 402, 404 (transaction does not exist), 406, 409,
+        410, 411, 423 and a business 401. Raised: 401 "Unauthorized request" (invalid checksum), every
+        response without the ``refund`` key - which is how the API answers validation errors (422) and
+        rate limits (429) - and every 5xx, even with the ``refund`` key.
         """
         operation = ops.check_availability(
             self._api.service, self._api.checksum, transaction_id, amount, reason

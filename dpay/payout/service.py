@@ -12,7 +12,8 @@ class PayoutService:
     """Payouts (withdrawals) of your account.
 
     Every endpoint signs the body in the order it is sent: ``sha256(value1|value2|...|secret_hash)`` -
-    optional fields are sent only when set.
+    optional fields are sent only when set, strings trimmed like the API trims them (see README, "Białe znaki
+    w API panelu").
     """
 
     def __init__(self, api: ApiRequestor) -> None:
@@ -27,9 +28,10 @@ class PayoutService:
     ) -> PayoutPage:
         """Your payouts, newest first - the source of ``withdraw_id``.
 
-        ``filters``: ``date_from`` and ``date_to`` (creation date range, any date or date-time, e.g.
-        ``2026-07-01``, ``2026-07-31 23:59:59``; sent trimmed), ``state`` (``PayoutState``) and ``type``
-        (``PayoutType``). ``per_page`` 1-200 (API default 50).
+        ``filters``: ``date_from`` and ``date_to`` (strings: creation date range, any date or date-time,
+        e.g. ``2026-07-01``, ``2026-07-31 23:59:59``; sent trimmed like every string of a panel request),
+        ``state`` (int, ``PayoutState``) and ``type`` (str, ``PayoutType``) - an unknown filter or a value
+        of another type raises ``DPayValueError``. ``per_page`` 1-200 (API default 50).
         """
         operation = ops.list_payouts(self._api.service, self._api.checksum, filters, page, per_page)
         return cast(PayoutPage, self._api.execute(operation))
