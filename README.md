@@ -239,10 +239,14 @@ if availability.is_available:
     ...
 ```
 
-`check_availability()` zwraca wynik (nie wyjątek) dla każdej odmowy biznesowej z kluczem `refund`: 400, 402,
-404 (transakcja nie istnieje), 406, 409, 410, 411, 423 i biznesowego 401 - przyczynę rozróżnia
-`availability.http_status`. Błędna suma kontrolna (401 "Unauthorized request"), 422, 429 i 5xx rzucają
-wyjątek.
+`check_availability()` rozstrzyga po treści odpowiedzi, nie po liście kodów: HTTP 200 i każda odpowiedź 4xx
+z kluczem `refund` to wynik (nie wyjątek) - dziś odmowy biznesowe 400, 402, 404 (transakcja nie istnieje), 406,
+409, 410, 411, 423 i biznesowe 401; przyczynę rozróżnia `availability.http_status`. Wyjątek rzucają: błędna suma
+kontrolna (401 "Unauthorized request"), każda odpowiedź bez klucza `refund` - tak API odpowiada na błędy
+walidacji (422) i limit zapytań (429) - oraz każde 5xx, także z kluczem `refund`.
+
+Identyfikator transakcji, powód i adres webhooka są wysyłane i podpisywane bez białych i niewidocznych znaków
+na brzegach - API panelu przycina je przed sprawdzeniem sumy kontrolnej (patrz [Białe znaki](#białe-znaki-w-api-panelu)).
 
 ## Szczegóły transakcji i banki
 
@@ -270,7 +274,18 @@ for payout in dpay.payouts.iterate({"date_from": "2026-08-01", "state": PayoutSt
 ```
 
 `list()` zwraca jedną stronę (`per_page` do 200), `details_full()` - sumy całego rozliczenia
-(`summary_net`, `summary_count`) i stronę pozycji (`per_page` do 500).
+(`summary_net`, `summary_count`) i stronę pozycji (`per_page` do 500). Filtry `date_from` i `date_to`
+to łańcuchy, `state` - liczba całkowita (`int`, nie `bool`), `type` - łańcuch; wartość innego typu, nieznany
+filtr i pusta data rzucają `DPayValueError`.
+
+### Białe znaki w API panelu
+
+API panelu (`refunds`, `payments.details()`, `banks.for_service()`, `payouts`) przycina każdy łańcuch żądania
+przed sprawdzeniem sumy kontrolnej - spacje, tabulatory i znaki nowej linii, ale też spacje Unicode (np. U+00A0,
+U+3000) i znaki niewidoczne (np. U+200B, U+FEFF). SDK wysyła i podpisuje te wartości (także nazwę serwisu)
+już przycięte, więc `" 2026-08-01\n"` trafia do API jako `"2026-08-01"`. Identyfikator transakcji, nazwa serwisu
+i daty, z których nic nie zostaje, rzucają `DPayValueError` (`transaction_id must not be empty`); powód zwrotu,
+z którego nic nie zostaje, jest wysyłany jako pusty.
 
 ## Karty S2S
 

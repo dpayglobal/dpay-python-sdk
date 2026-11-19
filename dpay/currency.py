@@ -4,7 +4,8 @@ import re
 
 from dpay.exceptions import DPayValueError
 
-_PATTERN = re.compile(r"^[A-Z]{3}$")
+# Whole string (fullmatch) - ``$`` would also match before a final "\n"
+_PATTERN = re.compile(r"[A-Z]{3}")
 
 
 class Currency:
@@ -19,7 +20,7 @@ class Currency:
 
     @staticmethod
     def is_valid(currency: str) -> bool:
-        return _PATTERN.match(currency) is not None
+        return _PATTERN.fullmatch(currency) is not None
 
     @staticmethod
     def assert_valid(currency: str) -> None:

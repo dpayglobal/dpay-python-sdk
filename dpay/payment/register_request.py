@@ -22,8 +22,9 @@ if TYPE_CHECKING:
     from dpay.recurring.registration import RecurringRegistration
     from dpay.webhook.target import WebhookTarget
 
-_PARTNER_PLATFORM = re.compile(r"^[A-Z0-9]{1,64}$")
-_BLIK_CODE = re.compile(r"^\d{6}$")
+# Whole string (fullmatch), ASCII digits
+_PARTNER_PLATFORM = re.compile(r"[A-Z0-9]{1,64}")
+_BLIK_CODE = re.compile(r"[0-9]{6}")
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 # Characters PHP trim() removes - the API trims strings the same way before validation
 _TRIMMED = " \t\n\r\x00\x0b"
@@ -154,13 +155,13 @@ class RegisterPaymentRequest:
         return self
 
     def with_partner_platform(self, partner_platform: str) -> RegisterPaymentRequest:
-        if _PARTNER_PLATFORM.match(partner_platform) is None:
+        if _PARTNER_PLATFORM.fullmatch(partner_platform) is None:
             raise DPayValueError("Partner platform must match ^[A-Z0-9]{1,64}$")
         self.partner_platform = partner_platform
         return self
 
     def with_blik_code(self, blik_code: str, user_agent: str, user_ip: str) -> RegisterPaymentRequest:
-        if _BLIK_CODE.match(blik_code) is None:
+        if _BLIK_CODE.fullmatch(blik_code) is None:
             raise DPayValueError("BLIK code must be exactly 6 digits")
         if self.blik_alias is not None:
             raise DPayValueError("blik_code cannot be combined with blik_alias")

@@ -4,8 +4,9 @@ import ipaddress
 import re
 from urllib.parse import urlsplit
 
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Whole string (fullmatch), ASCII digits - ``\d`` matches every Unicode digit and ``$`` a final "\n"
+_EMAIL = re.compile(r"[^@\s]+@[^@\s.]+(\.[^@\s.]+)+")
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def is_valid_url(url: str) -> bool:
@@ -35,11 +36,12 @@ def byte_length(text: str) -> int:
 
 
 def is_valid_email(email: str) -> bool:
-    return _EMAIL.match(email) is not None
+    # PHP FILTER_VALIDATE_EMAIL (without FILTER_FLAG_EMAIL_UNICODE) rejects non-ASCII addresses
+    return email.isascii() and _EMAIL.fullmatch(email) is not None
 
 
 def is_valid_date(date: str) -> bool:
-    return _DATE.match(date) is not None
+    return _DATE.fullmatch(date) is not None
 
 
 def assert_date(date: str) -> str:

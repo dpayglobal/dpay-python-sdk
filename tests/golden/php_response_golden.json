@@ -469,7 +469,7 @@
             "creation_date": null,
             "is_direct_settlement": false,
             "nrb": null,
-            "is_declined": true,
+            "is_declined": false,
             "decline_reason": null,
             "decline_status": null,
             "receiver": null
@@ -1048,7 +1048,7 @@
                 "decimal": "0.00"
             },
             "export_date": null,
-            "is_paysafecard": true,
+            "is_paysafecard": false,
             "is_processed": false,
             "is_failed": true,
             "receiver_amount": null
@@ -1109,7 +1109,7 @@
                     "currency": "PLN",
                     "creation_date": null,
                     "export_date": null,
-                    "is_declined": true
+                    "is_declined": false
                 }
             ],
             "meta": {

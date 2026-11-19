@@ -9,7 +9,7 @@ from dpay.money import Money
 from dpay.payment.enums import PayoutFeeMode
 
 _WHITESPACE = re.compile(r"\s", re.ASCII)
-_POLISH_IBAN = re.compile(r"PL\d{26}", re.ASCII)
+_POLISH_IBAN = re.compile(r"PL[0-9]{26}")
 
 
 class PayoutPosition:

@@ -9,6 +9,9 @@ _PEM = re.compile(
     re.DOTALL,
 )
 
+# ASCII whitespace only - ``str.split()`` would also drop Unicode spaces that OpenSSL rejects
+_PEM_WHITESPACE = re.compile(r"[ \t\n\r\x0b\x0c]+")
+
 _RSA_ENCRYPTION_OID = bytes.fromhex("06092a864886f70d010101")
 
 
@@ -47,7 +50,7 @@ def load_public_key(pem: str) -> RsaPublicKey:
         raise RsaError("Invalid RSA public key")
     label = match.group("label").strip()
     try:
-        der = base64.b64decode("".join(match.group("body").split()), validate=True)
+        der = base64.b64decode(_PEM_WHITESPACE.sub("", match.group("body")), validate=True)
     except ValueError as error:
         raise RsaError("Invalid RSA public key") from error
 
