@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 from typing import Any
 
 from dpay._internal.php import is_numeric, is_scalar, php_strval
@@ -105,6 +106,24 @@ class CardPaymentResult:
         if not self.requires_three_ds_form or self.redirect_text is None:
             return None
         return _decode_base64(self.redirect_text)
+
+    @property
+    def apple_pay_merchant_session(self) -> dict[str, Any] | None:
+        """Apple Pay merchant session from an APPLE_PAY_INIT call.
+
+        ``redirectType`` FORM with the Base64-encoded ApplePayMerchantSession JSON in ``redirectText`` -
+        pass it to ``completeMerchantValidation()`` on the device. ``None`` when the response does not
+        carry a JSON object (e.g. a 3-D Secure form).
+        """
+        if not self.requires_three_ds_form or self.redirect_text is None:
+            return None
+        try:
+            # Strict UTF-8: PHP json_decode() rejects invalid bytes as well
+            session = json.loads(base64.b64decode(self.redirect_text, validate=True).decode("utf-8"))
+        except (ValueError, binascii.Error):
+            return None
+        # Only a JSON object is a merchant session
+        return session if isinstance(session, dict) else None
 
     @property
     def redirect_url(self) -> str | None:

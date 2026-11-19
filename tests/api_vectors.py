@@ -21,6 +21,8 @@ SECRET_SECOND: list[dict[str, Any]] = DATA["secret_second"]
 OPERATION: list[dict[str, Any]] = DATA["operation"]
 ORDERED_BODY: list[dict[str, Any]] = DATA["ordered_body"]
 WEBHOOK: dict[str, Any] = DATA["webhook"]
+# IPN payloads as dpay sends them (``signature`` included), signed with SECRET_HASH
+IPN: list[dict[str, Any]] = DATA["ipn"]
 
 
 def vector(section: list[dict[str, Any]], name: str) -> dict[str, Any]:

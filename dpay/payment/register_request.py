@@ -27,6 +27,8 @@ _BLIK_CODE = re.compile(r"^\d{6}$")
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 # Characters PHP trim() removes - the API trims strings the same way before validation
 _TRIMMED = " \t\n\r\x00\x0b"
+# Channels the API refuses as a direct ``channel``
+_FORBIDDEN_CHANNELS = ("tester", "paypal", "installment", "paysafecard")
 
 
 class RegisterPaymentRequest:
@@ -93,6 +95,14 @@ class RegisterPaymentRequest:
         return self
 
     def with_channel(self, channel: str) -> RegisterPaymentRequest:
+        """Direct payment channel (bank or method ID, e.g. ``373`` for MB WAY), skipping the dpay gateway.
+
+        A channel requires the payer's email and name (``with_payer``) and ``with_accept_tos()``; it cannot
+        be tester, paypal, installment or paysafecard. An empty string is sent as before 0.3.0 and means
+        no channel (the API turns it into null).
+        """
+        if channel in _FORBIDDEN_CHANNELS:
+            raise DPayValueError(f'Channel "{channel}" cannot be used as a direct payment channel')
         self.channel = channel
         return self
 
@@ -121,13 +131,25 @@ class RegisterPaymentRequest:
         return self
 
     def with_phone_number(self, phone_number: str, currency_code: str) -> RegisterPaymentRequest:
-        Currency.assert_valid(currency_code)
+        """Payer's phone (MB WAY ``+351...``, 9-15 characters).
+
+        The currency must be the currency of the amount; since 0.3.0 ``currency_code`` is taken from
+        the amount anyway (``Money.of(500, Currency.EUR)``).
+        """
+        if len(phone_number) < 9 or len(phone_number) > 15:
+            raise DPayValueError("Phone number must be 9-15 characters")
+        self._assert_amount_currency(currency_code)
         self.phone_number = phone_number
         self.currency_code = currency_code
         return self
 
     def with_currency_code(self, currency_code: str) -> RegisterPaymentRequest:
-        Currency.assert_valid(currency_code)
+        """Sends ``currency_code`` explicitly.
+
+        Optional since 0.3.0: a non-PLN amount sends its currency on its own. The code must be the
+        currency of the amount.
+        """
+        self._assert_amount_currency(currency_code)
         self.currency_code = currency_code
         return self
 
@@ -217,7 +239,8 @@ class RegisterPaymentRequest:
         return self
 
     def with_alias_ipn_url(self, url: str) -> RegisterPaymentRequest:
-        if not is_valid_url(url):
+        """Address of ``alias_update`` notifications (BLIK OneClick, recurring payments), max 500 chars."""
+        if len(url) > 500 or not is_valid_url(url):
             raise DPayValueError(f'Invalid alias IPN URL "{url}"')
         self.alias_ipn_url = url
         return self
@@ -278,6 +301,8 @@ class RegisterPaymentRequest:
 
     def to_api(self, service: str) -> dict[str, Any]:
         self._assert_recurring_combination()
+        self._assert_direct_channel()
+        self._assert_efaktura_combination()
 
         body: dict[str, Any] = {
             "service": service,
@@ -316,8 +341,12 @@ class RegisterPaymentRequest:
                 body[key] = int(flag)
         if self.phone_number is not None:
             body["phone_number"] = self.phone_number
-        if self.currency_code is not None:
-            body["currency_code"] = self.currency_code
+        currency_code = self.currency_code
+        if currency_code is None and self.amount.currency != Currency.PLN:
+            # The API registers an amount without currency_code in PLN
+            currency_code = self.amount.currency
+        if currency_code is not None:
+            body["currency_code"] = currency_code
         if self.partner_platform is not None:
             body["partner_platform"] = self.partner_platform
         if self.user_agent is not None:
@@ -367,6 +396,54 @@ class RegisterPaymentRequest:
 
         return body
 
+    def _assert_amount_currency(self, currency_code: str) -> None:
+        Currency.assert_valid(currency_code)
+        if currency_code != self.amount.currency:
+            raise DPayValueError(
+                f'Currency code "{currency_code}" does not match the amount currency "{self.amount.currency}"'
+                f' - create the amount with Money.of(..., "{currency_code}")'
+            )
+
+    def _assert_direct_channel(self) -> None:
+        """MB WAY (mb_way_direct) needs channel ``373`` and the full device info; any direct channel needs
+        the payer's email, name and the terms acceptance - otherwise the API answers 422."""
+        has_channel = self.channel is not None and self.channel != ""
+        if self.transaction_type == TransactionType.MB_WAY_DIRECT:
+            if not has_channel:
+                raise DPayValueError(
+                    'transactionType "mb_way_direct" requires a channel (with_channel("373"))'
+                )
+            if self.device_info is None or self.device_info.browser_java_enabled is None:
+                raise DPayValueError(
+                    'transactionType "mb_way_direct" requires device info with browserJavaEnabled'
+                    " (with_device_info)"
+                )
+        if not has_channel:
+            return
+        payer = self.payer
+        if payer is None or payer.email is None or not payer.first_name or not payer.last_name:
+            raise DPayValueError(
+                "A direct channel requires the payer's email, first name and last name (with_payer)"
+            )
+        if self.accept_tos is None:
+            raise DPayValueError("A direct channel requires the terms acceptance (with_accept_tos)")
+
+    def _assert_efaktura_combination(self) -> None:
+        if self.efaktura is None:
+            return
+        conflicts: list[tuple[str, object]] = [
+            ("blik_code", self.blik_code),
+            ("blik_alias", self.blik_alias),
+            ("register_blik_alias", self.register_blik_alias),
+            ("recurring_registration", self.recurring_registration),
+            ("recurring_alias", self.recurring_alias),
+            ("register_card_recurring", self.card_recurring),
+            ("card_recurring_alias", self.card_recurring_alias),
+        ]
+        for field, value in conflicts:
+            if value is not None:
+                raise DPayValueError(f"efaktura cannot be combined with {field}")
+
     def _assert_recurring_combination(self) -> None:
         if self.recurring_registration is None and self.recurring_alias is None:
             return
@@ -381,7 +458,8 @@ class RegisterPaymentRequest:
             ("card_recurring_alias", self.card_recurring_alias),
         ]
         if self.recurring_registration is not None:
-            conflicts.append(("channel", self.channel))
+            # An empty channel is no channel (the API turns "" into null)
+            conflicts.append(("channel", None if self.channel == "" else self.channel))
             if self.blik_code is None:
                 raise DPayValueError(
                     "recurring_registration requires the customer's BLIK code (with_blik_code)"

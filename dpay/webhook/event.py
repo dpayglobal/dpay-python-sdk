@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from dpay.webhook.objects import PaymentObject, PayoutObject, RecurringPaymentObject, RefundObject
+
 
 def _string(raw: dict[str, Any], key: str) -> str | None:
     value = raw.get(key)
@@ -11,7 +13,8 @@ def _string(raw: dict[str, Any], key: str) -> str | None:
 class WebhookEvent:
     """Webhook event envelope: ``{id, type, api_version, created, livemode, service, [merchant_ref], data}``.
 
-    ``data.object`` stays a dict - payment, refund, recurring_payment or payout, amounts in minor units.
+    ``data.object`` is available as a dict (``object``) and as a typed model of its kind: ``payment``,
+    ``refund``, ``recurring_payment``, ``payout`` - amounts in minor units.
     """
 
     def __init__(self, raw: dict[str, Any]) -> None:
@@ -62,6 +65,28 @@ class WebhookEvent:
     def object_type(self) -> str | None:
         """``payment``, ``refund``, ``recurring_payment``, ``payout`` or ``webhook_endpoint``."""
         return _string(self.object, "object")
+
+    @property
+    def payment(self) -> PaymentObject | None:
+        """The ``payment`` object of payment.* events; ``None`` for other objects."""
+        return PaymentObject.from_api(self.object) if self.object_type == "payment" else None
+
+    @property
+    def refund(self) -> RefundObject | None:
+        """The ``refund`` object of refund.* events; ``None`` for other objects."""
+        return RefundObject.from_api(self.object) if self.object_type == "refund" else None
+
+    @property
+    def recurring_payment(self) -> RecurringPaymentObject | None:
+        """The ``recurring_payment`` object of recurring_payment.* events; ``None`` for other objects."""
+        return (
+            RecurringPaymentObject.from_api(self.object) if self.object_type == "recurring_payment" else None
+        )
+
+    @property
+    def payout(self) -> PayoutObject | None:
+        """The ``payout`` object of payout.* events; ``None`` for other objects."""
+        return PayoutObject.from_api(self.object) if self.object_type == "payout" else None
 
 
 class EventPage:

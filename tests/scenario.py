@@ -21,6 +21,8 @@ from dpay import (
     PayoutFeeMode,
     PayoutInstruction,
     PayoutPosition,
+    PayoutState,
+    PayoutType,
     RecurringRegistration,
     RegisterPaymentRequest,
     ReturnUrls,
@@ -119,7 +121,7 @@ def run() -> dict[str, Any]:
         .with_installment(False)
         .with_paypal(True)
         .with_no_banks(False)
-        .with_phone_number("+48123456789", Currency.EUR)
+        .with_phone_number("+48123456789", Currency.PLN)
         .with_partner_platform("SHOPIFY01")
         .with_alias_ipn_url("https://shop.test/alias-ipn")
         .with_no_delay(True)
@@ -310,6 +312,60 @@ def run() -> dict[str, Any]:
         created_from="2026-09-01T00:00:00Z",
         limit=10,
         timestamp=1784700000,
+    )
+
+    # 0.3.0: refund message ID header, payout list and full details, Apple Pay email, MB WAY
+    recorder.queue_json(200, {"status": "success", "refund": True, "message": "dpay.pl zwrot RET-2026-0001"})
+    dpay.refunds.create("tx-1", None, None, None, "RET-2026-0001")
+
+    recorder.queue_json(
+        200, {"withdraws": [], "meta": {"page": 2, "per_page": 10, "total": 0, "total_pages": 0}}
+    )
+    dpay.payouts.list(
+        {
+            "type": PayoutType.STANDARD,
+            "state": PayoutState.WAITING,
+            "date_to": "2026-08-31 23:59:59 ",
+            "date_from": " 2026-08-01\n",
+        },
+        2,
+        10,
+    )
+
+    recorder.queue_json(200, {"settlement": {"id": 4242}, "summary": {}, "transactions": [], "meta": {}})
+    dpay.payouts.details_full(4242, 1, 500)
+
+    recorder.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
+    dpay.cards.apple_pay(
+        "tx-1", ApplePayRequest.pay("ap-token", device).with_email("a@b.pl").with_channel_id(91)
+    )
+
+    recorder.queue_json(200, {"transactionId": "tx-5", "msg": "Internal processing"})
+    dpay.payments.register(
+        RegisterPaymentRequest.create(
+            Money.of(500, Currency.EUR),
+            TransactionType.MB_WAY_DIRECT,
+            ReturnUrls("https://shop.test/ok", "https://shop.test/fail", "https://shop.test/ipn"),
+        )
+        .with_phone_number("+351912345678", Currency.EUR)
+        .with_channel("373")
+        .with_payer(Payer.create().with_email("client@example.com").with_name("Joao", "Silva"))
+        .with_accept_tos(False)
+        .with_device_info(
+            DeviceInfo.create(
+                "text/html",
+                "pt-PT",
+                24,
+                1080,
+                1920,
+                0,
+                "Mozilla/5.0",
+                "Windows",
+                "38.72,-9.14",
+                "device-mbw",
+                "Loja",
+            ).with_browser_java_enabled(False)
+        )
     )
 
     out["calls"] = [

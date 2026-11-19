@@ -6,8 +6,9 @@ from dpay.exceptions import DPayValueError
 
 class BlikAliasRegistration:
     def __init__(self, label: str, type: str = BlikAliasType.UID) -> None:
-        if label == "" or len(label) > 50:
-            raise DPayValueError("Alias label must be 1-50 characters")
+        # BLIK limit, counted in characters
+        if label == "" or len(label) > 35:
+            raise DPayValueError("Alias label must be 1-35 characters")
         BlikAliasType.assert_valid(type)
         self.label = label
         self.type = type

@@ -11,6 +11,8 @@ class Currency:
     PLN = "PLN"
     EUR = "EUR"
     CZK = "CZK"
+    USD = "USD"
+    RON = "RON"
 
     def __init__(self) -> None:
         raise DPayValueError("Currency is not instantiable")

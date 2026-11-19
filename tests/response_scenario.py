@@ -6,13 +6,16 @@ from typing import Any
 
 from dpay.bank.models import Bank
 from dpay.blik.models import BlikAlias
+from dpay.card.card_error import CardError
 from dpay.card.results import CardPaymentResult
+from dpay.ipn.alias_update import AliasUpdate
 from dpay.money import Money
 from dpay.payment.models import RegisteredPayment, Transaction
-from dpay.payout.models import PayoutDetails
+from dpay.payout.models import PayoutDetails, PayoutListItem, PayoutPage, PayoutSettlement
 from dpay.recurring.models import RecurringRetryResult, RecurringStatus
 from dpay.refund.models import Refund, RefundAvailability
 from dpay.webhook.event import WebhookEvent
+from dpay.webhook.failure import Failure
 
 FIXTURES: dict[str, list[Any]] = json.loads(
     (Path(__file__).parent / "golden" / "response_fixtures.json").read_text("utf-8")
@@ -73,7 +76,264 @@ def run() -> dict[str, Any]:
         str(index): _webhook_event(WebhookEvent.from_api(data))
         for index, data in enumerate(FIXTURES["webhook_event"])
     }
+
+    # 0.3.0
+    out["registered_v3"] = {
+        str(index): _registered_v3(RegisteredPayment.from_api(item["data"], item["currency"]))
+        for index, item in enumerate(FIXTURES["registered_v3"])
+    }
+    out["transaction_v3"] = {
+        str(index): _transaction_v3(Transaction.from_api(data))
+        for index, data in enumerate(FIXTURES["transaction_v3"])
+    }
+    out["payout_v3"] = {
+        str(index): _payout_v3(PayoutDetails.from_api(data))
+        for index, data in enumerate(FIXTURES["payout_v3"])
+    }
+    out["payout_page"] = {
+        str(index): _payout_page(PayoutPage.from_api(data))
+        for index, data in enumerate(FIXTURES["payout_page"])
+    }
+    out["payout_settlement"] = {
+        str(index): _payout_settlement(PayoutSettlement.from_api(data))
+        for index, data in enumerate(FIXTURES["payout_settlement"])
+    }
+    out["webhook_object"] = {
+        str(index): _webhook_object(WebhookEvent.from_api(data))
+        for index, data in enumerate(FIXTURES["webhook_object"])
+    }
+    out["alias_update"] = {
+        str(index): _alias_update(AliasUpdate.from_api(data))
+        for index, data in enumerate(FIXTURES["alias_update"])
+    }
+    out["card_error"] = {
+        str(index): {
+            "code": error.code,
+            "decline_code": error.decline_code,
+            "decline_message": error.decline_message,
+        }
+        for index, error in enumerate(CardError.from_api(data) for data in FIXTURES["card_error"])
+    }
+    out["merchant_session"] = {
+        str(index): {"session": CardPaymentResult.from_api(data).apple_pay_merchant_session}
+        for index, data in enumerate(FIXTURES["merchant_session"])
+    }
     return out
+
+
+def _registered_v3(payment: RegisteredPayment) -> dict[str, Any]:
+    multibanco = payment.multibanco
+    paid = payment.paid_transaction
+    return {
+        "multibanco": None
+        if multibanco is None
+        else {
+            "entity": multibanco.entity,
+            "reference": multibanco.reference,
+            "amount": _money(multibanco.amount),
+            "currency": multibanco.currency,
+            "expires_at": multibanco.expires_at,
+        },
+        "paid_transaction": None
+        if paid is None
+        else {
+            "payment_id": paid.payment_id,
+            "status": paid.status,
+            "is_paid": paid.is_paid,
+            "value": _money(paid.value),
+            "email": paid.email,
+            "description": paid.description,
+            "name": paid.name,
+            "surname": paid.surname,
+            "pid": paid.pid,
+            "mtid": paid.mtid,
+            "creation_date": paid.creation_date,
+            "payment_date": paid.payment_date,
+        },
+    }
+
+
+def _transaction_v3(transaction: Transaction) -> dict[str, Any]:
+    urls = transaction.urls
+    return {
+        "rate": transaction.rate,
+        "minimal_fee": transaction.minimal_fee,
+        "permanent_fee": transaction.permanent_fee,
+        "urls": None if urls is None else {"success": urls.success, "fail": urls.fail, "ipn": urls.ipn},
+    }
+
+
+def _payout_v3(payout: PayoutDetails) -> dict[str, Any]:
+    receiver = payout.receiver
+    return {
+        "currency": payout.currency,
+        "net": _money(payout.net),
+        "gross": _money(payout.gross),
+        "export_date": payout.export_date,
+        "is_paysafecard": payout.is_paysafecard,
+        "is_processed": payout.is_processed,
+        "is_failed": payout.is_failed,
+        "receiver_amount": None if receiver is None else _money(receiver.amount),
+    }
+
+
+def _payout_list_item(item: PayoutListItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "type": item.type,
+        "state": item.state,
+        "is_waiting": item.is_waiting,
+        "is_processed": item.is_processed,
+        "is_failed": item.is_failed,
+        "net": _money(item.net),
+        "fee": _money(item.fee),
+        "gross": _money(item.gross),
+        "currency": item.currency,
+        "creation_date": item.creation_date,
+        "export_date": item.export_date,
+        "is_declined": item.is_declined,
+    }
+
+
+def _page_meta(meta: Any) -> dict[str, Any]:
+    return {
+        "page": meta.page,
+        "per_page": meta.per_page,
+        "total": meta.total,
+        "total_pages": meta.total_pages,
+        "has_more": meta.has_more,
+    }
+
+
+def _payout_page(page: PayoutPage) -> dict[str, Any]:
+    return {
+        "items": [_payout_list_item(item) for item in page.items],
+        "meta": _page_meta(page.meta),
+        "has_more": page.has_more,
+    }
+
+
+def _payout_settlement(settlement: PayoutSettlement) -> dict[str, Any]:
+    return {
+        "settlement": _payout_v3(settlement.settlement),
+        "summary_net": _money(settlement.summary_net),
+        "summary_fee": _money(settlement.summary_fee),
+        "summary_gross": _money(settlement.summary_gross),
+        "summary_count": settlement.summary_count,
+        "positions": [
+            {
+                "payment_id": position.payment_id,
+                "date": position.date,
+                "net": _money(position.net),
+                "fee": _money(position.fee),
+                "gross": _money(position.gross),
+                "service_id": position.service_id,
+                "service_name": position.service_name,
+                "custom": position.custom,
+                "ipksef": position.ipksef,
+            }
+            for position in settlement.positions
+        ],
+        "meta": _page_meta(settlement.meta),
+    }
+
+
+def _failure(failure: Failure | None) -> dict[str, Any] | None:
+    if failure is None:
+        return None
+    return {
+        "code": failure.code,
+        "message": failure.message,
+        "category": failure.category,
+        "is_retryable": failure.is_retryable,
+        "provider_code": failure.provider_code,
+    }
+
+
+def _webhook_object(event: WebhookEvent) -> dict[str, Any]:
+    payment = event.payment
+    refund = event.refund
+    recurring = event.recurring_payment
+    payout = event.payout
+    return {
+        "payment": None
+        if payment is None
+        else {
+            "id": payment.id,
+            "status": payment.status,
+            "currency": payment.currency,
+            "amount": _money(payment.amount),
+            "amount_refunded": _money(payment.amount_refunded),
+            "amount_captured": _money(payment.amount_captured),
+            "description": payment.description,
+            "created": payment.created,
+            "paid_at": payment.paid_at,
+            "payment_method_type": payment.payment_method_type,
+            "failure": _failure(payment.failure),
+            "is_recurring": payment.is_recurring,
+            "recurring_alias": payment.recurring_alias,
+            "recurring_registration": payment.recurring_registration,
+            "recurring_sequence": payment.recurring_sequence,
+            "merchant_reference": payment.merchant_reference,
+            "provider_reference": payment.provider_reference,
+            "custom": payment.custom,
+        },
+        "refund": None
+        if refund is None
+        else {
+            "id": refund.id,
+            "payment": refund.payment,
+            "status": refund.status,
+            "currency": refund.currency,
+            "amount": _money(refund.amount),
+            "created": refund.created,
+            "succeeded_at": refund.succeeded_at,
+            "failure": _failure(refund.failure),
+        },
+        "recurring_payment": None
+        if recurring is None
+        else {
+            "id": recurring.id,
+            "alias": recurring.alias,
+            "status": recurring.status,
+            "canceled_by": recurring.canceled_by,
+            "payment_method_type": recurring.payment_method_type,
+            "model": recurring.model,
+            "frequency": recurring.frequency,
+            "limit_amount": recurring.limit_amount,
+            "total_limit_amount": recurring.total_limit_amount,
+            "starts_on": recurring.starts_on,
+            "expires_on": recurring.expires_on,
+            "created": recurring.created,
+        },
+        "payout": None
+        if payout is None
+        else {
+            "id": payout.id,
+            "status": payout.status,
+            "currency": payout.currency,
+            "amount": _money(payout.amount),
+            "fee": _money(payout.fee),
+            "bank_account_last4": payout.bank_account_last4,
+            "created": payout.created,
+            "paid_at": payout.paid_at,
+            "failure": _failure(payout.failure),
+        },
+    }
+
+
+def _alias_update(alias: AliasUpdate) -> dict[str, Any]:
+    return {
+        "change_type": alias.change_type,
+        "alias_type": alias.alias_type,
+        "alias_status": alias.alias_status,
+        "is_active": alias.is_active,
+        "alias_key": alias.alias_key,
+        "alias_label": alias.alias_label,
+        "alias_expire_at": alias.alias_expire_at,
+        "change_reason_category": alias.change_reason_category,
+        "change_reason_message": alias.change_reason_message,
+    }
 
 
 def _registered(payment: RegisteredPayment) -> dict[str, Any]:

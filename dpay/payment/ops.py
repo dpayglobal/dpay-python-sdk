@@ -34,16 +34,16 @@ def register(service: str, checksum: ChecksumCalculator, request: RegisterPaymen
         "POST",
         base_urls.API_PAYMENTS,
         "/api/v1_0/payments/register",
-        _parse_register,
+        lambda response: _parse_register(response, request.amount.currency),
         body,
     )
 
 
-def _parse_register(response: ApiResponse) -> RegisteredPayment:
+def _parse_register(response: ApiResponse, currency: str) -> RegisteredPayment:
     data = decode_dict_or_fail(response)
     if data.get("error", False) is True or data.get("status", True) is False:
         raise PaymentRejectedError.from_api(data)
-    return RegisteredPayment.from_api(data)
+    return RegisteredPayment.from_api(data, currency)
 
 
 def details(service: str, checksum: ChecksumCalculator, transaction_id: str) -> Operation:

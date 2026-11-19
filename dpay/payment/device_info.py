@@ -35,6 +35,7 @@ class DeviceInfo:
         self.geo_localization = geo_localization
         self.device_id = device_id
         self.application_name = application_name
+        # ``None`` when not set - MB WAY registration requires it.
         self.browser_java_enabled: bool | None = None
 
     @classmethod
