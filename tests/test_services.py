@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 
@@ -7,17 +8,25 @@ import pytest
 
 from dpay import (
     ApiServerError,
+    ApplePayRequest,
     AuthenticationError,
     CardPaymentError,
     CardPaymentRequest,
+    Currency,
     DPayClient,
     DPayValueError,
+    InvalidRequestError,
     Money,
+    NotFoundError,
+    Payer,
     PaymentRejectedError,
+    RegisteredTransaction,
     RegisterPaymentRequest,
     ReturnUrls,
+    Transaction,
     TransactionType,
 )
+from dpay.refund.service import RefundService
 from dpay.testing import MockHttpClient
 from tests.conftest import SECRET, SERVICE
 from tests.scenario import build_device_info
@@ -482,3 +491,391 @@ def test_request_body_is_valid_json(client: DPayClient, transport: MockHttpClien
     transport.queue_json(200, {"transactionId": "t", "msg": "ok"})
     client.payments.register(_request())
     assert json.loads(transport.last_request.body or "")["service"] == SERVICE
+
+
+# 0.3.0 - refunds
+
+
+def test_refund_message_id_goes_to_the_header_not_the_checksum(transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"status": "success", "refund": True, "message": "dpay.pl zwrot RET-2026-0001"})
+    refund = _shop_client(transport).refunds.create(
+        "30D9493D-1D73-3FBD-A5D4-633723CC7A68", None, None, None, "RET-2026-0001"
+    )
+
+    assert refund.message == "dpay.pl zwrot RET-2026-0001"
+    assert transport.last_request.headers[RefundService.MESSAGE_ID_HEADER] == "RET-2026-0001"
+    assert RefundService.MESSAGE_ID_HEADER == "DigitalPayments-PSP-Message-ID"
+    body = transport.last_request_body
+    assert list(body) == ["service", "transaction_id", "checksum"]
+    assert body["checksum"] == "3b345f55900ae6a43220dd14a3827ed9a26a02a3eb46b856d302e2baa44b48a4"
+
+
+def test_refund_without_message_id_sends_no_header(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"status": "success", "refund": True, "message": "dpay.pl TX"})
+    client.refunds.create("TX-1")
+    assert "DigitalPayments-PSP-Message-ID" not in transport.last_request.headers
+
+
+def test_refund_message_id_keeps_the_shared_vector_checksum() -> None:
+    from tests import api_vectors
+
+    transport = MockHttpClient()
+    client = DPayClient(
+        service=api_vectors.SERVICE, secret_hash=api_vectors.SECRET_HASH, http_client=transport
+    )
+    transport.queue_json(200, {"status": "success", "refund": True})
+    client.refunds.create(api_vectors.TRANSACTION_ID, message_id="RET-2026-0001")
+    expected = api_vectors.vector(api_vectors.ORDERED_BODY, "refund_full")["checksum"]
+    assert transport.last_request_body["checksum"] == expected
+
+
+@pytest.mark.parametrize(
+    "message_id",
+    ["", "   ", "RET\r\nX-Evil: 1", "ZWROT-ŁÓDŹ", "RET-1\n", "RET\t1"],
+    ids=["empty", "spaces-only", "line-break", "non-ascii", "trailing-newline", "tab"],
+)
+def test_invalid_refund_message_id_is_rejected(
+    client: DPayClient, transport: MockHttpClient, message_id: str
+) -> None:
+    with pytest.raises(DPayValueError, match="Refund message ID must be non-empty printable ASCII"):
+        client.refunds.create("TX-1", message_id=message_id)
+    assert transport.requests == []
+
+
+def test_long_refund_message_id_is_sent_whole(client: DPayClient, transport: MockHttpClient) -> None:
+    # The API keeps the first 24 bytes - no client-side limit
+    transport.queue_json(200, {"status": "success", "refund": True})
+    client.refunds.create("TX-1", message_id="R" * 40)
+    assert transport.last_request.headers["DigitalPayments-PSP-Message-ID"] == "R" * 40
+
+
+def test_availability_buyer_support_refusal_on_423_is_an_outcome(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(
+        423,
+        {
+            "status": "error",
+            "refund": False,
+            "code": "BUYER_SUPPORT_REFUND_NOT_APPLICABLE",
+            "message": "Zwrot przez BOK dpay",
+        },
+    )
+    availability = client.refunds.check_availability("TX-1")
+    assert availability.is_available is False
+    assert availability.http_status == 423
+
+
+def test_availability_server_error_with_refund_key_raises(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(500, {"status": "error", "refund": False, "message": "Server error"})
+    with pytest.raises(ApiServerError):
+        client.refunds.check_availability("TX-1")
+
+
+def test_availability_without_refund_key_raises(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(404, {"message": "Not Found"})
+    with pytest.raises(NotFoundError):
+        client.refunds.check_availability("TX-1")
+    transport.queue_json(422, {"message": "The given data was invalid.", "errors": {"value": ["x"]}})
+    with pytest.raises(InvalidRequestError):
+        client.refunds.check_availability("TX-1")
+
+
+def test_availability_checksum_401_raises_but_business_401_answers(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(401, {"refund": False, "message": "Unauthorized request"})
+    with pytest.raises(AuthenticationError):
+        client.refunds.check_availability("TX-1")
+    transport.queue_json(
+        401, {"refund": False, "message": "Transakcji dokonanych kanałami paysafecard nie można zwrócić"}
+    )
+    assert client.refunds.check_availability("TX-1").http_status == 401
+
+
+# 0.3.0 - cards
+
+
+def test_card_decline_at_http_200_carries_card_error(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        200,
+        {
+            "success": False,
+            "status": "error",
+            "message": "Payment declined",
+            "error": {"code": "payment_declined", "declineCode": "05", "declineMessage": "Do not honor"},
+        },
+    )
+    with pytest.raises(CardPaymentError) as error:
+        client.cards.pay_otp("TX-1", CardPaymentRequest.create(build_device_info()))
+    assert error.value.error_code == "Payment declined"
+    assert error.value.http_status == 200
+    card_error = error.value.card_error
+    assert card_error is not None
+    assert (card_error.code, card_error.decline_code, card_error.decline_message) == (
+        "payment_declined",
+        "05",
+        "Do not honor",
+    )
+
+
+def test_card_decline_without_error_object_has_no_card_error(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(200, {"success": False, "status": "error", "message": "DCC_OFFER_EXPIRED"})
+    with pytest.raises(CardPaymentError) as error:
+        client.cards.pay_otp("TX-1", CardPaymentRequest.create(build_device_info()))
+    assert error.value.error_code == "DCC_OFFER_EXPIRED"
+    assert error.value.card_error is None
+
+
+def test_apple_pay_init_returns_the_merchant_session(client: DPayClient, transport: MockHttpClient) -> None:
+    session = {"epochTimestamp": 1790503500000, "merchantSessionIdentifier": "SSH-1", "signature": "abc"}
+    transport.queue_json(
+        200,
+        {
+            "success": True,
+            "status": "success",
+            "message": {
+                "redirectType": "FORM",
+                "redirectText": base64.b64encode(json.dumps(session).encode()).decode(),
+            },
+        },
+    )
+    result = client.cards.apple_pay("TX-1", ApplePayRequest.init(build_device_info()))
+    assert result.apple_pay_merchant_session == session
+    assert "email" not in transport.last_request_body
+
+
+def test_apple_pay_merchant_session_vectors(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        200,
+        {
+            "success": True,
+            "message": {
+                "redirectType": "FORM",
+                "redirectText": "eyJlcG9jaFRpbWVzdGFtcCI6MTc5MDUwMzUwMDAwMCwibWVyY2hhbnRTZXNzaW9uSWRlbnRpZmllciI6IlNTSC0xIn0=",
+            },
+        },
+    )
+    result = client.cards.apple_pay("TX-1", ApplePayRequest.init(build_device_info()))
+    assert result.apple_pay_merchant_session == {
+        "epochTimestamp": 1790503500000,
+        "merchantSessionIdentifier": "SSH-1",
+    }
+
+
+def test_merchant_session_is_none_for_a_three_ds_form(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        200,
+        {
+            "success": True,
+            "status": "success",
+            "message": {"redirectType": "FORM", "redirectText": "PGZvcm0gbWV0aG9kPSJQT1NUIj48L2Zvcm0+"},
+        },
+    )
+    result = client.cards.pay_otp("TX-1", CardPaymentRequest.create(build_device_info()))
+    assert result.apple_pay_merchant_session is None
+    assert result.three_ds_form_html == '<form method="POST"></form>'
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"redirectType": "FORM", "redirectText": base64.b64encode(b"[1,2]").decode()},
+        {"redirectType": "FORM", "redirectText": base64.b64encode(b'{"a":"\xff"}').decode()},
+        {"redirectType": "URL", "redirectText": base64.b64encode(b'{"a":1}').decode()},
+        {"redirectType": "FORM", "redirectText": "not base64!"},
+        {"redirectType": "SUCCESS"},
+    ],
+    ids=["json-list", "invalid-utf8", "url-redirect", "invalid-base64", "success"],
+)
+def test_merchant_session_needs_a_json_object_in_a_form(
+    client: DPayClient, transport: MockHttpClient, message: dict[str, str]
+) -> None:
+    transport.queue_json(200, {"success": True, "message": message})
+    result = client.cards.apple_pay("TX-1", ApplePayRequest.init(build_device_info()))
+    assert result.apple_pay_merchant_session is None
+
+
+def test_apple_pay_sends_the_email_first(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(200, {"success": True, "status": "success", "message": {"redirectType": "SUCCESS"}})
+    client.cards.apple_pay(
+        "TX-1",
+        ApplePayRequest.pay("APPLE-TOKEN", build_device_info())
+        .with_email("client@example.com")
+        .with_channel_id(31),
+    )
+    body = transport.last_request_body
+    assert list(body) == ["email", "channelId", "xPayType", "xPayToken", "deviceInfo"]
+    assert body["email"] == "client@example.com"
+    assert body["xPayType"] == "APPLE_PAY"
+
+
+# 0.3.0 - payments
+
+
+def test_register_paid_returns_the_paid_transaction(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        200,
+        {
+            "error": False,
+            "msg": "Transaction paid",
+            "status": True,
+            "transactionId": "30D9493D-1D73-3FBD-A5D4-633723CC7A68",
+            "additionalInfo": {
+                "transaction": {
+                    "payment_id": "30D9493D-1D73-3FBD-A5D4-633723CC7A68",
+                    "pid": None,
+                    "mtid": None,
+                    "email": "client@example.com",
+                    "description": "Zamowienie #1234",
+                    "name": "Jan",
+                    "surname": "Kowalski",
+                    "value": "10.00",
+                    "status": "paid",
+                    "creation_date": "2026-11-18 10:00:00",
+                    "payment_date": "2026-11-18 10:01:00",
+                }
+            },
+        },
+    )
+    transaction = client.payments.register(_request()).paid_transaction
+
+    assert transaction is not None
+    assert transaction.payment_id == "30D9493D-1D73-3FBD-A5D4-633723CC7A68"
+    assert transaction.status == RegisteredTransaction.STATUS_PAID
+    assert transaction.is_paid
+    assert transaction.value == Money.pln(1000)
+    assert transaction.email == "client@example.com"
+    assert transaction.name == "Jan"
+    assert transaction.surname == "Kowalski"
+    assert transaction.pid is None
+    assert transaction.payment_date == "2026-11-18 10:01:00"
+
+
+def test_register_without_extras_has_no_paid_transaction_or_multibanco(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(200, {"transactionId": "tx-1", "msg": "Transaction paid"})
+    payment = client.payments.register(_request())
+    assert payment.paid_transaction is None
+    assert payment.multibanco is None
+
+
+def test_register_multibanco_returns_the_reference(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        200,
+        {
+            "error": False,
+            "msg": "https://secure.dpay.pl/transfer@pay@ABC",
+            "status": True,
+            "transactionId": "ABC",
+            "multibanco": {
+                "entity": "12345",
+                "reference": "123456789",
+                "amount": "12.50",
+                "currency": "EUR",
+                "expires_at": "2026-11-21T10:00:00+00:00",
+            },
+        },
+    )
+    request = (
+        RegisterPaymentRequest.create(
+            Money.of(1250, Currency.EUR),
+            TransactionType.TRANSFERS,
+            ReturnUrls("https://shop.example/ok", "https://shop.example/fail"),
+        )
+        .with_channel("390")
+        .with_payer(Payer.create().with_email("client@example.com").with_name("Joao", "Silva"))
+        .with_accept_tos(True)
+    )
+    payment = client.payments.register(request)
+
+    assert transport.last_request_body["currency_code"] == "EUR"
+    multibanco = payment.multibanco
+    assert multibanco is not None
+    assert multibanco.entity == "12345"
+    assert multibanco.reference == "123456789"
+    assert multibanco.amount == Money.of(1250, "EUR")
+    assert multibanco.currency == "EUR"
+    assert multibanco.expires_at == "2026-11-21T10:00:00+00:00"
+    assert payment.currency == "EUR"
+
+
+def test_paid_transaction_value_uses_the_request_currency(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(
+        200,
+        {
+            "msg": "Transaction paid",
+            "additionalInfo": {"transaction": {"value": "10.00", "status": "captured"}},
+        },
+    )
+    request = RegisterPaymentRequest.create(Money.of(1000, Currency.CZK), TransactionType.TRANSFERS, URLS)
+    transaction = client.payments.register(request).paid_transaction
+    assert transaction is not None
+    assert transaction.value == Money.of(1000, "CZK")
+    assert transaction.is_paid
+
+
+def _transaction_fixture(**fields: object) -> Transaction:
+    return Transaction.from_api({"transaction": {"id": "x", "value": "1.00", "status": "paid", **fields}})
+
+
+def test_transaction_maps_fees_and_urls() -> None:
+    transaction = _transaction_fixture(
+        rate=2,
+        minimal_fee=20,
+        permanent_fee=0,
+        urls={
+            "success": "https://shop.example/ok",
+            "fail": "https://shop.example/fail",
+            "ipn": "https://shop.example/ipn",
+        },
+    )
+    assert transaction.rate == "2"
+    assert transaction.minimal_fee == 20
+    assert transaction.permanent_fee == 0
+    urls = transaction.urls
+    assert urls is not None
+    assert (urls.success, urls.fail, urls.ipn) == (
+        "https://shop.example/ok",
+        "https://shop.example/fail",
+        "https://shop.example/ipn",
+    )
+
+
+def test_transaction_fees_from_database_strings_and_missing_ipn() -> None:
+    transaction = _transaction_fixture(
+        rate="1.49", minimal_fee="30", urls={"success": "https://shop.example/ok", "fail": "", "ipn": None}
+    )
+    assert transaction.rate == "1.49"
+    assert transaction.minimal_fee == 30
+    assert transaction.permanent_fee is None
+    urls = transaction.urls
+    assert urls is not None
+    assert urls.fail is None
+    assert urls.ipn is None
+
+
+def test_transaction_fee_rules_for_odd_values() -> None:
+    transaction = _transaction_fixture(rate=1.5, minimal_fee=20.0, permanent_fee="-5")
+    assert transaction.rate == "1.5"
+    assert transaction.minimal_fee is None
+    assert transaction.permanent_fee == -5
+    odd = _transaction_fixture(rate=True, minimal_fee="1.5", permanent_fee=False, urls="x")
+    assert odd.rate is None
+    assert odd.minimal_fee is None
+    assert odd.permanent_fee is None
+    assert odd.urls is None
+
+
+def test_missing_fees_and_urls_are_none() -> None:
+    transaction = _transaction_fixture()
+    assert transaction.rate is None
+    assert transaction.minimal_fee is None
+    assert transaction.urls is None

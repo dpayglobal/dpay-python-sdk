@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from dpay._internal import base_urls
 from dpay._internal.checksum import ChecksumCalculator
 from dpay._internal.error_mapper import map_error
 from dpay._internal.operation import Operation, decode_dict_or_fail
+from dpay.exceptions import DPayValueError
 from dpay.http.models import ApiResponse
 from dpay.money import Money
 from dpay.refund.models import Refund, RefundAvailability
 from dpay.webhook.event_type import WebhookEventType
 from dpay.webhook.target import WebhookTarget
 
-_AVAILABILITY_OUTCOMES = (200, 400, 402, 406, 409, 410, 411)
+# Request header with your own refund identifier; it sets the refund transfer title.
+MESSAGE_ID_HEADER = "DigitalPayments-PSP-Message-ID"
+_MESSAGE_ID = re.compile(r"[\x20-\x7e]+")
 
 
 def _signed_body(
@@ -42,15 +46,27 @@ def create(
     amount: Money | None,
     reason: str | None,
     webhook: WebhookTarget | None = None,
+    message_id: str | None = None,
 ) -> Operation:
     if webhook is not None:
         webhook.assert_events_allowed(WebhookEventType.REFUND, "a refund")
+    headers: dict[str, str] = {}
+    if message_id is not None:
+        if (
+            not isinstance(message_id, str)
+            or _MESSAGE_ID.fullmatch(message_id) is None
+            or message_id.strip(" ") == ""
+        ):
+            raise DPayValueError("Refund message ID must be non-empty printable ASCII")
+        # Header only - not in the body and not in the checksum
+        headers[MESSAGE_ID_HEADER] = message_id
     return Operation(
         "POST",
         base_urls.PANEL,
         "/api/v1/pbl/refund",
         lambda response: Refund.from_api(decode_dict_or_fail(response)),
         _signed_body(service, checksum, transaction_id, amount, reason, webhook),
+        headers=headers,
     )
 
 
@@ -79,6 +95,8 @@ def _parse_availability(response: ApiResponse) -> RefundAvailability:
 
 
 def _is_outcome(status: int, data: dict[str, Any]) -> bool:
-    if status in _AVAILABILITY_OUTCOMES:
-        return True
-    return status == 401 and data.get("message") != "Unauthorized request"
+    # 200 and every 4xx business refusal (400, 402, 404, 406, 409, 410, 411, 423...) carrying ``refund``;
+    # a 401 only when it is not the checksum error
+    if status == 401:
+        return data.get("message") != "Unauthorized request"
+    return status == 200 or 400 <= status < 500

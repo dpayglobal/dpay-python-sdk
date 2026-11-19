@@ -189,3 +189,36 @@ def test_missing_httpx_gives_actionable_error(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(DPayError, match="dpay-python-sdk\\[async\\]"):
         AsyncDPayClient(service=SERVICE, secret_hash=SECRET)
+
+
+async def test_0_3_operations_match_sync_wire_format(
+    async_client: AsyncDPayClient, async_transport: MockAsyncHttpClient
+) -> None:
+    from dpay import ApplePayRequest, DPayClient
+    from dpay.testing import MockHttpClient
+
+    sync_transport = MockHttpClient()
+    sync_client = DPayClient(service=SERVICE, secret_hash=SECRET, http_client=sync_transport)
+    for transport in (sync_transport, async_transport):
+        transport.queue_json(200, {"status": "success", "refund": True, "message": "dpay.pl zwrot RET-1"})
+        transport.queue_json(
+            404, {"status": "error", "refund": False, "message": "Transaction does not exist!"}
+        )
+        transport.queue_json(200, {"success": True, "message": {"redirectType": "SUCCESS"}})
+
+    sync_client.refunds.create("tx-1", message_id="RET-1")
+    sync_availability = sync_client.refunds.check_availability("tx-404")
+    sync_client.cards.apple_pay("tx-1", ApplePayRequest.pay("t", build_device_info()).with_email("a@b.pl"))
+
+    refund = await async_client.refunds.create("tx-1", message_id="RET-1")
+    availability = await async_client.refunds.check_availability("tx-404")
+    await async_client.cards.apple_pay(
+        "tx-1", ApplePayRequest.pay("t", build_device_info()).with_email("a@b.pl")
+    )
+
+    assert refund.message == "dpay.pl zwrot RET-1"
+    assert availability.http_status == sync_availability.http_status == 404
+    assert [(r.url, r.headers, r.body) for r in async_transport.requests] == [
+        (r.url, r.headers, r.body) for r in sync_transport.requests
+    ]
+    assert async_transport.requests[0].headers["DigitalPayments-PSP-Message-ID"] == "RET-1"

@@ -16,6 +16,8 @@ class Operation:
     parse: Callable[[ApiResponse], Any]
     body: dict[str, Any] | None = None
     raise_for_status: bool = True
+    # Extra request headers (e.g. ``DigitalPayments-PSP-Message-ID``), sent after Accept and User-Agent
+    headers: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

@@ -97,9 +97,10 @@ def test_foreign_transaction_is_a_not_found(client: DPayClient, transport: MockH
         client.payments.details("cudza-transakcja")
 
 
-def test_missing_transaction_on_check_availability_is_not_a_business_outcome(
+def test_missing_transaction_on_check_availability_is_a_business_outcome(
     client: DPayClient, transport: MockHttpClient
 ) -> None:
+    # Since 0.3.0 every 4xx carrying ``refund`` is an availability answer (BREAKING)
     transport.queue_json(
         404,
         {
@@ -109,17 +110,25 @@ def test_missing_transaction_on_check_availability_is_not_a_business_outcome(
             "0": "Transaction does not exist!",
         },
     )
-    with pytest.raises(NotFoundError) as error:
-        client.refunds.check_availability("nie-istnieje")
-    assert error.value.message == "Transaction does not exist!"
+    availability = client.refunds.check_availability("nie-istnieje")
+    assert availability.is_available is False
+    assert availability.message == "Transaction does not exist!"
+    assert availability.http_status == 404
 
 
-def test_foreign_transaction_on_check_availability_is_not_a_business_outcome(
+def test_foreign_transaction_on_check_availability_is_a_business_outcome(
     client: DPayClient, transport: MockHttpClient
 ) -> None:
     transport.queue_json(404, {"refund": False, "message": "Transaction does not exist!"})
+    assert client.refunds.check_availability("cudza-transakcja").http_status == 404
+
+
+def test_not_found_without_refund_key_on_check_availability_raises(
+    client: DPayClient, transport: MockHttpClient
+) -> None:
+    transport.queue_json(404, {"message": "Not Found"})
     with pytest.raises(NotFoundError):
-        client.refunds.check_availability("cudza-transakcja")
+        client.refunds.check_availability("tx-1")
 
 
 def test_business_refusal_codes_still_return_an_outcome(

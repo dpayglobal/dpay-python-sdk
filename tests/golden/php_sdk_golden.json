@@ -5,10 +5,10 @@
             "url": "https://api-payments.dpay.pl/api/v1_0/payments/register",
             "headers": {
                 "Accept": "application/json",
-                "User-Agent": "dpay-php-sdk/0.1.1 php/8.4.21",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
                 "Content-Type": "application/json"
             },
-            "body": "{\"service\":\"test_service\",\"value\":\"29.99\",\"transactionType\":\"transfers\",\"url_success\":\"https://shop.test/ok\",\"url_fail\":\"https://shop.test/fail\",\"url_ipn\":\"https://shop.test/ipn\",\"description\":\"Zamówienie #1234 / ĄĘŚŻ\",\"custom\":\"order-1234\",\"email\":\"jan@example.com\",\"client_name\":\"Jan\",\"client_surname\":\"Kowalski\",\"accept_tos\":true,\"channel\":\"86\",\"creditcard\":1,\"paysafecard\":0,\"blik\":1,\"installment\":0,\"paypal\":1,\"nobanks\":0,\"phone_number\":\"+48123456789\",\"currency_code\":\"EUR\",\"partner_platform\":\"SHOPIFY01\",\"alias_ipn_url\":\"https://shop.test/alias-ipn\",\"no_delay\":true,\"authorize_only\":false,\"card_recurring_operation\":\"charge\",\"payout\":{\"fee_mode\":\"gross\",\"positions\":[{\"iban\":\"PL61109010140000071219812874\",\"title\":\"Wypłata 1\",\"amount\":10.5}]},\"billing_address\":{\"street\":\"Testowa 1\",\"city\":\"Warszawa\"},\"shipping_address\":{\"street\":\"Inna 2\"},\"device_info\":{\"browserAcceptHeader\":\"text/html\",\"browserLanguage\":\"pl-PL\",\"browserColorDepth\":24,\"browserScreenHeight\":1080,\"browserScreenWidth\":1920,\"browserTZ\":-60,\"browserUserAgent\":\"Mozilla/5.0\",\"systemFamily\":\"Windows\",\"geoLocalization\":\"52.2297,21.0122\",\"deviceID\":\"device-abc\",\"applicationName\":\"Sklep Testowy\",\"browserJavaEnabled\":\"true\"},\"products\":[{\"name\":\"Produkt\",\"price\":29.99}],\"efaktura\":true,\"invoice\":{\"payer_nip\":\"1234563218\",\"payer_name\":\"Firma sp. z o.o.\",\"invoice_number\":\"FV/2026/07/1\",\"payment_due_date\":\"2026-08-15\",\"vat_amount\":560},\"checksum\":\"056198b45db5fcec2140233fbc8b3b0929fdad82c0a678933c91b8d561ac7058\"}"
+            "body": "{\"service\":\"test_service\",\"value\":\"29.99\",\"transactionType\":\"transfers\",\"url_success\":\"https://shop.test/ok\",\"url_fail\":\"https://shop.test/fail\",\"url_ipn\":\"https://shop.test/ipn\",\"description\":\"Zamówienie #1234 / ĄĘŚŻ\",\"custom\":\"order-1234\",\"email\":\"jan@example.com\",\"client_name\":\"Jan\",\"client_surname\":\"Kowalski\",\"accept_tos\":true,\"channel\":\"86\",\"creditcard\":1,\"paysafecard\":0,\"blik\":1,\"installment\":0,\"paypal\":1,\"nobanks\":0,\"phone_number\":\"+48123456789\",\"currency_code\":\"PLN\",\"partner_platform\":\"SHOPIFY01\",\"alias_ipn_url\":\"https://shop.test/alias-ipn\",\"no_delay\":true,\"authorize_only\":false,\"card_recurring_operation\":\"charge\",\"payout\":{\"fee_mode\":\"gross\",\"positions\":[{\"iban\":\"PL61109010140000071219812874\",\"title\":\"Wypłata 1\",\"amount\":10.5}]},\"billing_address\":{\"street\":\"Testowa 1\",\"city\":\"Warszawa\"},\"shipping_address\":{\"street\":\"Inna 2\"},\"device_info\":{\"browserAcceptHeader\":\"text/html\",\"browserLanguage\":\"pl-PL\",\"browserColorDepth\":24,\"browserScreenHeight\":1080,\"browserScreenWidth\":1920,\"browserTZ\":-60,\"browserUserAgent\":\"Mozilla/5.0\",\"systemFamily\":\"Windows\",\"geoLocalization\":\"52.2297,21.0122\",\"deviceID\":\"device-abc\",\"applicationName\":\"Sklep Testowy\",\"browserJavaEnabled\":\"true\"},\"products\":[{\"name\":\"Produkt\",\"price\":29.99}],\"efaktura\":true,\"invoice\":{\"payer_nip\":\"1234563218\",\"payer_name\":\"Firma sp. z o.o.\",\"invoice_number\":\"FV/2026/07/1\",\"payment_due_date\":\"2026-08-15\",\"vat_amount\":560},\"checksum\":\"056198b45db5fcec2140233fbc8b3b0929fdad82c0a678933c91b8d561ac7058\"}"
         },
         {
             "method": "POST",
@@ -25,10 +25,10 @@
             "url": "https://api-payments.dpay.pl/api/v1_0/payments/register",
             "headers": {
                 "Accept": "application/json",
-                "User-Agent": "dpay-php-sdk/0.2.0 php/8.4.24",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
                 "Content-Type": "application/json"
             },
-            "body": "{\"service\":\"test_service\",\"value\":\"5.00\",\"transactionType\":\"card_recurring\",\"url_success\":\"https://shop.test/ok\",\"url_fail\":\"https://shop.test/fail\",\"url_ipn\":\"https://shop.test/ipn\",\"register_blik_alias\":{\"label\":\"Moj alias\",\"type\":\"UID\"},\"register_card_recurring\":{\"label\":\"Mandat\",\"frequency\":\"MONTHLY\",\"limit_amt\":20000,\"tot_limit_amt\":100000,\"is_limit_amt_fixed\":false,\"expiration_date\":\"2028-12-31\",\"init_date\":\"2026-09-01\"},\"checksum\":\"bb6346930c49321bad9714039e350519df459075a20c94bd1ef8f79ba26bfd0c\"}"
+            "body": "{\"service\":\"test_service\",\"value\":\"5.00\",\"transactionType\":\"card_recurring\",\"url_success\":\"https://shop.test/ok\",\"url_fail\":\"https://shop.test/fail\",\"url_ipn\":\"https://shop.test/ipn\",\"currency_code\":\"CZK\",\"register_blik_alias\":{\"label\":\"Moj alias\",\"type\":\"UID\"},\"register_card_recurring\":{\"label\":\"Mandat\",\"frequency\":\"MONTHLY\",\"limit_amt\":20000,\"tot_limit_amt\":100000,\"is_limit_amt_fixed\":false,\"expiration_date\":\"2028-12-31\",\"init_date\":\"2026-09-01\"},\"checksum\":\"bb6346930c49321bad9714039e350519df459075a20c94bd1ef8f79ba26bfd0c\"}"
         },
         {
             "method": "POST",
@@ -287,6 +287,57 @@
                 "Content-Type": "application/json"
             },
             "body": "{\"service\":\"test_service\",\"timestamp\":1784700000,\"types\":[\"payment.succeeded\",\"refund.failed\"],\"created_from\":\"2026-09-01T00:00:00Z\",\"limit\":10,\"checksum\":\"908bc14e0508b40fd902bda92fb53267c2c3905553d07ebd394f2884ae4572bf\"}"
+        },
+        {
+            "method": "POST",
+            "url": "https://panel.dpay.pl/api/v1/pbl/refund",
+            "headers": {
+                "Accept": "application/json",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
+                "DigitalPayments-PSP-Message-ID": "RET-2026-0001",
+                "Content-Type": "application/json"
+            },
+            "body": "{\"service\":\"test_service\",\"transaction_id\":\"tx-1\",\"checksum\":\"9508d77a17bdd44829ecc450214a3e356ca0cbe2f93c28012e3a5f6b39b4aa30\"}"
+        },
+        {
+            "method": "POST",
+            "url": "https://panel.dpay.pl/api/v1/pbl/withdraws",
+            "headers": {
+                "Accept": "application/json",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
+                "Content-Type": "application/json"
+            },
+            "body": "{\"service\":\"test_service\",\"date_from\":\"2026-08-01\",\"date_to\":\"2026-08-31 23:59:59\",\"state\":0,\"type\":\"standard\",\"page\":2,\"per_page\":10,\"checksum\":\"a5eb577b4cb84221fd5b9cc1f854bbda2f1185cc0cf49aad9e5d8fd3544dcb71\"}"
+        },
+        {
+            "method": "POST",
+            "url": "https://panel.dpay.pl/api/v1/pbl/withdraws/details/full",
+            "headers": {
+                "Accept": "application/json",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
+                "Content-Type": "application/json"
+            },
+            "body": "{\"service\":\"test_service\",\"withdraw_id\":4242,\"page\":1,\"per_page\":500,\"checksum\":\"8702180b131a74cf722672c5f0358a4085d12ed5301aae613849aa2fe5af5ffc\"}"
+        },
+        {
+            "method": "POST",
+            "url": "https://api-payments.dpay.pl/api/v1_0/cards/payment/tx-1/pay/apple-pay",
+            "headers": {
+                "Accept": "application/json",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
+                "Content-Type": "application/json"
+            },
+            "body": "{\"email\":\"a@b.pl\",\"channelId\":91,\"xPayType\":\"APPLE_PAY\",\"xPayToken\":\"ap-token\",\"deviceInfo\":{\"browserAcceptHeader\":\"text/html\",\"browserLanguage\":\"pl-PL\",\"browserColorDepth\":24,\"browserScreenHeight\":1080,\"browserScreenWidth\":1920,\"browserTZ\":-60,\"browserUserAgent\":\"Mozilla/5.0\",\"systemFamily\":\"Windows\",\"geoLocalization\":\"52.2297,21.0122\",\"deviceID\":\"device-abc\",\"applicationName\":\"Sklep Testowy\",\"browserJavaEnabled\":\"true\"}}"
+        },
+        {
+            "method": "POST",
+            "url": "https://api-payments.dpay.pl/api/v1_0/payments/register",
+            "headers": {
+                "Accept": "application/json",
+                "User-Agent": "dpay-php-sdk/0.3.0 php/8.3.6",
+                "Content-Type": "application/json"
+            },
+            "body": "{\"service\":\"test_service\",\"value\":\"5.00\",\"transactionType\":\"mb_way_direct\",\"url_success\":\"https://shop.test/ok\",\"url_fail\":\"https://shop.test/fail\",\"url_ipn\":\"https://shop.test/ipn\",\"email\":\"client@example.com\",\"client_name\":\"Joao\",\"client_surname\":\"Silva\",\"accept_tos\":false,\"channel\":\"373\",\"phone_number\":\"+351912345678\",\"currency_code\":\"EUR\",\"device_info\":{\"browserAcceptHeader\":\"text/html\",\"browserLanguage\":\"pt-PT\",\"browserColorDepth\":24,\"browserScreenHeight\":1080,\"browserScreenWidth\":1920,\"browserTZ\":0,\"browserUserAgent\":\"Mozilla/5.0\",\"systemFamily\":\"Windows\",\"geoLocalization\":\"38.72,-9.14\",\"deviceID\":\"device-mbw\",\"applicationName\":\"Loja\",\"browserJavaEnabled\":\"false\"},\"checksum\":\"bb6346930c49321bad9714039e350519df459075a20c94bd1ef8f79ba26bfd0c\"}"
         }
     ],
     "checksums": {

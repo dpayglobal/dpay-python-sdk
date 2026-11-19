@@ -1,4 +1,5 @@
 from dpay.card.card_data import CardData
+from dpay.card.card_error import CardError
 from dpay.card.encryptor import CardEncryptor
 from dpay.card.enums import (
     CardRecurringFrequency,
@@ -16,6 +17,7 @@ __all__ = [
     "AsyncCardService",
     "CardData",
     "CardEncryptor",
+    "CardError",
     "CardPaymentRequest",
     "CardPaymentResult",
     "CardRecurringFrequency",

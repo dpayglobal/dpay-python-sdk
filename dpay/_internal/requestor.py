@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import re
 from typing import Any
 
 from dpay._internal.base_urls import BaseUrls
@@ -9,12 +10,15 @@ from dpay._internal.error_mapper import map_error
 from dpay._internal.operation import Operation
 from dpay._internal.php import php_json_encode
 from dpay.config import Config
-from dpay.exceptions import TransportError
+from dpay.exceptions import DPayValueError, TransportError
 from dpay.http.base import AsyncHttpClient, HttpClient
 from dpay.http.models import ApiRequest, ApiResponse
 from dpay.version import SDK_VERSION
 
 USER_AGENT = f"dpay-python-sdk/{SDK_VERSION} python/{platform.python_version()}"
+
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]+")
+_HEADER_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class _RequestorBase:
@@ -30,6 +34,11 @@ class _RequestorBase:
     def build_request(self, operation: Operation) -> ApiRequest:
         url = self.base_urls.resolve(operation.host) + operation.path
         headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+        for name, value in operation.headers.items():
+            # Names and values must not carry line breaks - no header injection
+            if _HEADER_NAME.fullmatch(name) is None or _HEADER_CONTROL_CHARACTERS.search(value) is not None:
+                raise DPayValueError(f'Invalid request header "{name}"')
+            headers[name] = value
         encoded: str | None = None
         if operation.body is not None:
             headers["Content-Type"] = "application/json"
