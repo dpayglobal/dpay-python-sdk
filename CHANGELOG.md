@@ -6,6 +6,83 @@ wersjonowanie zgodne z [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-19
+
+Wersja dogania dokumentację API dpay (OpenAPI 1.6.0) i działa z obecnym API - nie wymaga nowego wydania API.
+Port SDK PHP 0.3.0 - parytet potwierdzają golden vectors wygenerowane z SDK PHP 0.3.0 (34 wywołania
+i parsowanie odpowiedzi) oraz wspólne `tests/fixtures/api_vectors.json`.
+
+### Breaking
+
+- **BREAKING** `refunds.check_availability()` zwraca `RefundAvailability` (niedostępny) zamiast rzucać wyjątek
+  dla każdej odpowiedzi 4xx z kluczem `refund`, w tym 404 (transakcja nie istnieje, wcześniej
+  `NotFoundError`) i 423 (zwrot przez BOK dpay). Przyczynę rozróżnia `http_status`. Nadal rzucają:
+  401 "Unauthorized request" (`AuthenticationError`), 422, 429 i 5xx.
+- **BREAKING** Waluta kwoty trafia do `currency_code`: `Money` w walucie innej niż PLN wysyła `currency_code`
+  bez `with_currency_code()` (wcześniej np. `Money.of(49900, "CZK")` rejestrowało 499.00 w walucie domyślnej
+  serwisu). `with_currency_code()` i `with_phone_number()` rzucają `DPayValueError`, gdy waluta różni się
+  od waluty kwoty - dla MB WAY użyj `Money.of(grosze, Currency.EUR)` zamiast `Money.pln()`. Kwota w PLN
+  bez jawnego kodu wysyła body jak dotąd (bez `currency_code`).
+- **BREAKING** `IpnVerifier.construct_event()` przyjmuje IPN `alias_update` (wcześniej rzucał
+  `SignatureVerificationError` "Invalid IPN payload"). Przychodzi on na `url_ipn`, gdy rejestracja nie miała
+  `alias_ipn_url` - obsługa, która oznacza zamówienie jako opłacone bez sprawdzenia `is_transfer`, potraktowałaby
+  zmianę aliasu (np. `ALIAS_DECLINED`) jak wpłatę. Dla `alias_update` `amount` jest puste, a `email`,
+  `custom` i `attempt` zwracają `None`/0 (te pola nie są podpisane).
+
+### Added
+
+- IPN `alias_update` (BLIK OneClick i płatności cykliczne): `IpnVerifier.construct_event()` weryfikuje podpis
+  `sha256(id + hash + type + version)`, `IpnType.ALIAS_UPDATE`, `IpnEvent.is_alias_update`
+  i `IpnEvent.alias_update` (`AliasUpdate` ze stałymi `change_type`, `alias_type` i `alias_status`).
+- `CardError` (`code`, `decline_code`, `decline_message`): `CardPaymentError.card_error` z obiektu `error`
+  odmowy karty oraz `ApiError.card_error` i `ApiError.transaction_id` z pól `cardError` i `transactionId`
+  błędu Payments API (np. odrzucone pobranie na zapisanej karcie).
+- `client.payouts.list()` i `iterate()` (`POST /api/v1/pbl/withdraws`, filtry `date_from`, `date_to`,
+  `state`, `type`, strony do 200) oraz `details_full()` (`POST /api/v1/pbl/withdraws/details/full`: nagłówek,
+  sumy całego rozliczenia i pozycje z `payment_id`, `custom`, `ipksef`, strony do 500); modele `PayoutPage`,
+  `PayoutListItem`, `PayoutSettlement`, `SettlementPosition`, `PageMeta`, `PayoutState`, `PayoutType`.
+- `PayoutDetails.currency` (z `currency_code`, PLN gdy go brak), `export_date` i `is_paysafecard`.
+- `refunds.create()`: opcjonalny argument `message_id` - nagłówek `DigitalPayments-PSP-Message-ID`
+  (tytuł przelewu `dpay.pl zwrot {message_id}`, poza sumą kontrolną), stała `RefundService.MESSAGE_ID_HEADER`.
+- `RegisteredPayment.multibanco` (`MultibancoReference`: encja, referencja, kwota, ważność)
+  i `RegisteredPayment.paid_transaction` (`RegisteredTransaction` z odpowiedzi "Transaction paid", statusy
+  pending, paid, captured, canceled); `RegisteredPayment.from_api()` przyjmuje walutę kwoty.
+- Typowane obiekty webhooków: `WebhookEvent.payment`, `refund`, `recurring_payment`, `payout`
+  (`PaymentObject`, `RefundObject`, `RecurringPaymentObject`, `PayoutObject`), `Failure`,
+  `DeclineCode` (22 kody odmów dpay) i `FailureCategory`.
+- `RecurringRetryResult.is_success` i `RetryRefusal` (kody `errors.retry` odmowy ponowienia).
+- `Transaction.rate`, `minimal_fee`, `permanent_fee` i `urls` (`TransactionUrls`).
+- `ApplePayRequest.with_email()` i `CardPaymentResult.apple_pay_merchant_session` (sesja
+  ApplePayMerchantSession z `redirectText` odpowiedzi APPLE_PAY_INIT).
+- `RateLimitError.reset` (nagłówek `X-RateLimit-Reset`), `Currency.USD` i `Currency.RON`,
+  `PayoutPosition.is_valid_polish_iban()`.
+- `tests/fixtures/api_vectors.json`: wektory IPN transfer, dcb i alias_update oraz sum list i szczegółów
+  wypłat.
+
+### Changed
+
+- Walidacja przed wysłaniem tego, co API i tak odrzuca (422 lub 400):
+  - etykieta `register_blik_alias` (`BlikAliasRegistration`) i `recurring_registration`
+    (`RecurringRegistration`) do 35 znaków (limit BLIK, wcześniej 50);
+  - `mb_way_direct` wymaga kanału (`with_channel("373")`) i `DeviceInfo` z `with_browser_java_enabled()`;
+  - kanał bezpośredni wymaga emaila, imienia i nazwiska płatnika oraz `with_accept_tos()`; kanały `tester`,
+    `paypal`, `installment` i `paysafecard` są odrzucane; pusty kanał (`""`) jest wysyłany jak dotąd
+    i oznacza brak kanału;
+  - `phone_number` 9-15 znaków, `alias_ipn_url` do 500 znaków;
+  - `efaktura` nie łączy się z `blik_code`, `blik_alias`, `register_blik_alias`, płatnościami cyklicznymi
+    ani aliasami kart;
+  - `PayoutPosition`: IBAN `PL` + 26 cyfr z poprawną sumą kontrolną mod 97 (spacje i małe litery dozwolone)
+    i kwota powyżej 0.
+- `ApiError.transaction_id` przeniesione z `PaymentRejectedError` do klasy bazowej (bez zmiany zachowania).
+
+Świadome różnice wobec SDK PHP:
+
+- `payouts.list()` przyjmuje filtry jako słownik (`Mapping`), jak tablica w PHP; filtr z wartością `None`
+  jest pomijany, a data, która nie jest `str`, rzuca `DPayValueError` (w PHP `TypeError`); w kliencie
+  asynchronicznym `payouts.iterate()` jest asynchronicznym generatorem
+- identyfikator zwrotu z końcowym znakiem nowej linii odrzuca komunikat "Refund message ID must be non-empty
+  printable ASCII" (w PHP ten sam przypadek kończy się komunikatem "Invalid request header")
+
 ## [0.2.0] - wydanie razem z wdrożeniem API dpay
 
 Wersja wymaga API dpay z tym samym wydaniem (wspólne API płatności cyklicznych, suma kontrolna capture
@@ -115,7 +192,8 @@ poziomu. Zachowaliśmy krótki import dla spójności z SDK PHP i lepszego DX -
 tamten pakiet wymaga zależności ze składnią Pythona 2 i nie da się go zaimportować
 na Pythonie 3.10+, więc realne ryzyko współistnienia jest znikome.
 
-[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/dpayglobal/dpay-python-sdk/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dpayglobal/dpay-python-sdk/releases/tag/v0.1.0
