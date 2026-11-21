@@ -28,8 +28,9 @@ class RecurringRegistration:
     METHOD_BLIK = "blik"
 
     def __init__(self, label: str, model: str, terms_url: str) -> None:
-        if label == "" or len(label) > 50:
-            raise DPayValueError("Recurring payment label must be 1-50 characters")
+        # BLIK limit, counted in characters
+        if label == "" or len(label) > 35:
+            raise DPayValueError("Recurring payment label must be 1-35 characters")
         if model not in (self.MODEL_A, self.MODEL_M, self.MODEL_O):
             raise DPayValueError(f'Invalid recurring model "{model}"')
         if byte_length(terms_url) > 2048 or not is_valid_url(terms_url):

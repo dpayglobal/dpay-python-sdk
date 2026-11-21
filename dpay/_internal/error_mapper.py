@@ -16,6 +16,9 @@ from dpay.http.models import ApiResponse
 
 
 def map_error(response: ApiResponse) -> ApiError:
+    # Imported here: the dpay.card package imports the requestor, which imports this module
+    from dpay.card.card_error import CardError
+
     status = response.status
     raw_body = response.body
     decoded = response.decode_json()
@@ -35,6 +38,13 @@ def map_error(response: ApiResponse) -> ApiError:
         error_code = data["errorcode"]
     reason = data["reason"] if isinstance(data.get("reason"), str) else None
     field_errors = _normalize_field_errors(data.get("errors"))
+    # Payments API: the transaction created before the error and the card decline (declined saved-card charge)
+    raw_transaction_id = data.get("transactionId")
+    transaction_id = (
+        raw_transaction_id if isinstance(raw_transaction_id, str) and raw_transaction_id else None
+    )
+    raw_card_error = data.get("cardError")
+    card_error = CardError.from_api(raw_card_error) if isinstance(raw_card_error, dict) else None
 
     if status == 429:
         return RateLimitError(
@@ -44,18 +54,20 @@ def map_error(response: ApiResponse) -> ApiError:
             _int_header(response, "X-RateLimit-Limit"),
             _int_header(response, "X-RateLimit-Remaining"),
             raw_body,
+            _int_header(response, "X-RateLimit-Reset"),
         )
+    arguments = (message, status, error_code, field_errors, raw_body, reason, transaction_id, card_error)
     if status == 401:
-        return AuthenticationError(message, status, error_code, field_errors, raw_body, reason)
+        return AuthenticationError(*arguments)
     if status == 403:
-        return AccessDeniedError(message, status, error_code, field_errors, raw_body, reason)
+        return AccessDeniedError(*arguments)
     if status == 404:
-        return NotFoundError(message, status, error_code, field_errors, raw_body, reason)
+        return NotFoundError(*arguments)
     if status in (400, 422):
-        return InvalidRequestError(message, status, error_code, field_errors, raw_body, reason)
+        return InvalidRequestError(*arguments)
     if status >= 500:
-        return ApiServerError(message, status, error_code, field_errors, raw_body, reason)
-    return ApiError(message, status, error_code, field_errors, raw_body, reason)
+        return ApiServerError(*arguments)
+    return ApiError(*arguments)
 
 
 def _normalize_field_errors(errors: Any) -> dict[str, list[str]]:

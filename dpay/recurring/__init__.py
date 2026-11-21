@@ -1,4 +1,9 @@
-from dpay.recurring.models import RecurringRegistrationInfo, RecurringRetryResult, RecurringStatus
+from dpay.recurring.models import (
+    RecurringRegistrationInfo,
+    RecurringRetryResult,
+    RecurringStatus,
+    RetryRefusal,
+)
 from dpay.recurring.registration import RecurringRegistration
 from dpay.recurring.service import AsyncRecurringService, RecurringService
 
@@ -9,4 +14,5 @@ __all__ = [
     "RecurringRetryResult",
     "RecurringService",
     "RecurringStatus",
+    "RetryRefusal",
 ]

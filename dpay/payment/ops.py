@@ -6,6 +6,7 @@ from dpay._internal import base_urls
 from dpay._internal.checksum import ChecksumCalculator
 from dpay._internal.operation import Operation, decode_dict_or_fail
 from dpay._internal.php import is_scalar, php_strval
+from dpay._internal.server_trim import required, sign_panel_body
 from dpay.exceptions import PaymentRejectedError
 from dpay.http.models import ApiResponse
 from dpay.payment.models import RegisteredPayment, Transaction
@@ -34,21 +35,26 @@ def register(service: str, checksum: ChecksumCalculator, request: RegisterPaymen
         "POST",
         base_urls.API_PAYMENTS,
         "/api/v1_0/payments/register",
-        _parse_register,
+        lambda response: _parse_register(response, request.amount.currency),
         body,
     )
 
 
-def _parse_register(response: ApiResponse) -> RegisteredPayment:
+def _parse_register(response: ApiResponse, currency: str) -> RegisteredPayment:
     data = decode_dict_or_fail(response)
     if data.get("error", False) is True or data.get("status", True) is False:
         raise PaymentRejectedError.from_api(data)
-    return RegisteredPayment.from_api(data)
+    return RegisteredPayment.from_api(data, currency)
 
 
 def details(service: str, checksum: ChecksumCalculator, transaction_id: str) -> Operation:
-    body: dict[str, Any] = {"service": service, "transaction_id": transaction_id}
-    body["checksum"] = checksum.ordered_body(body)
+    body = sign_panel_body(
+        checksum,
+        {
+            "service": required(service, "service"),
+            "transaction_id": required(transaction_id, "transaction_id"),
+        },
+    )
     return Operation(
         "POST",
         base_urls.PANEL,

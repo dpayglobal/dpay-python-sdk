@@ -4,19 +4,20 @@ import re
 
 from dpay.exceptions import DPayValueError
 
-_PAN = re.compile(r"^\d{12,19}$")
-_CVV = re.compile(r"^\d{3,4}$")
-_EXPIRY = re.compile(r"^(0[1-9]|1[0-2])/\d{2}$")
+# Whole string (fullmatch), ASCII digits - ``\d`` matches every Unicode digit and ``$`` a final "\n"
+_PAN = re.compile(r"[0-9]{12,19}")
+_CVV = re.compile(r"[0-9]{3,4}")
+_EXPIRY = re.compile(r"(0[1-9]|1[0-2])/[0-9]{2}")
 
 
 class CardData:
     def __init__(self, pan: str, cvv: str, expiry: str) -> None:
         normalized_pan = pan.replace(" ", "")
-        if _PAN.match(normalized_pan) is None:
+        if _PAN.fullmatch(normalized_pan) is None:
             raise DPayValueError("Card number must be 12-19 digits")
-        if _CVV.match(cvv) is None:
+        if _CVV.fullmatch(cvv) is None:
             raise DPayValueError("CVV must be 3-4 digits")
-        if _EXPIRY.match(expiry) is None:
+        if _EXPIRY.fullmatch(expiry) is None:
             raise DPayValueError("Expiry must be in MM/YY format")
         self.pan = normalized_pan
         self.cvv = cvv

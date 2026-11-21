@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
+
 import pytest
 
 from dpay import (
@@ -11,6 +14,7 @@ from dpay import (
     Currency,
     DccDecision,
     DeviceInfo,
+    DPayClient,
     DPayValueError,
     InvoiceDetails,
     Money,
@@ -23,6 +27,7 @@ from dpay import (
     TransactionType,
 )
 from dpay.card.requests import CardPaymentRequest
+from dpay.testing import MockHttpClient
 from tests.scenario import build_device_info
 
 URLS = ReturnUrls("https://a.pl/ok", "https://a.pl/fail", "https://a.pl/ipn")
@@ -132,10 +137,10 @@ def test_alias_ipn_url_is_validated() -> None:
 
 
 def test_phone_number_sets_currency_too() -> None:
-    request = RegisterPaymentRequest.create(Money.pln(1), TransactionType.TRANSFERS, URLS)
-    request.with_phone_number("+48123", Currency.EUR)
+    request = RegisterPaymentRequest.create(Money.of(1, Currency.EUR), TransactionType.TRANSFERS, URLS)
+    request.with_phone_number("+351912345678", Currency.EUR)
     body = request.to_api("s")
-    assert body["phone_number"] == "+48123"
+    assert body["phone_number"] == "+351912345678"
     assert body["currency_code"] == "EUR"
 
 
@@ -192,25 +197,26 @@ def test_payout_rejects_foreign_positions() -> None:
 
 
 def test_payout_rejects_unknown_fee_mode() -> None:
-    position = PayoutPosition("PL61", "tytul", Money.pln(1))
+    position = PayoutPosition("PL61109010140000071219812874", "tytul", Money.pln(1))
     with pytest.raises(DPayValueError, match='Invalid payout fee mode "brutto"'):
         PayoutInstruction.create([position], "brutto")
 
 
 def test_payout_position_validates_iban_and_title() -> None:
-    with pytest.raises(DPayValueError, match="Payout IBAN must not be empty"):
+    with pytest.raises(DPayValueError, match="valid Polish IBAN"):
         PayoutPosition("", "tytul", Money.pln(1))
     with pytest.raises(DPayValueError, match="Payout title must be 1-255 characters"):
-        PayoutPosition("PL61", "", Money.pln(1))
+        PayoutPosition("PL61109010140000071219812874", "", Money.pln(1))
 
 
 def test_payout_position_amount_is_a_float() -> None:
-    assert PayoutPosition("PL61", "t", Money.pln(1050)).to_api()["amount"] == 10.50
+    assert PayoutPosition("PL61109010140000071219812874", "t", Money.pln(1050)).to_api()["amount"] == 10.50
 
 
 def test_blik_alias_label_length() -> None:
-    with pytest.raises(DPayValueError, match="Alias label must be 1-50 characters"):
-        BlikAliasRegistration("x" * 51)
+    assert BlikAliasRegistration("x" * 35).to_api() == {"label": "x" * 35, "type": "UID"}
+    with pytest.raises(DPayValueError, match="Alias label must be 1-35 characters"):
+        BlikAliasRegistration("x" * 36)
 
 
 def test_blik_aliases_are_only_uid() -> None:
@@ -312,3 +318,298 @@ def test_card_request_field_order() -> None:
 def test_validation_errors_are_also_value_errors() -> None:
     with pytest.raises(ValueError):
         Currency.assert_valid("nope")
+
+
+# 0.3.0 - currency_code, MB WAY, direct channels, efaktura, payout positions
+
+
+def _device(java_enabled: bool | None) -> DeviceInfo:
+    device = DeviceInfo.create(
+        "text/html",
+        "pt-PT",
+        24,
+        1200,
+        1920,
+        -60,
+        "Mozilla/5.0",
+        "Win32",
+        "38.72,-9.14",
+        "device-1",
+        "Netscape",
+    )
+    return device if java_enabled is None else device.with_browser_java_enabled(java_enabled)
+
+
+def _payer() -> Payer:
+    return Payer.create().with_email("client@example.com").with_name("Joao", "Silva")
+
+
+def _mb_way() -> RegisterPaymentRequest:
+    return (
+        RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+        .with_phone_number("+351912345678", Currency.EUR)
+        .with_channel("373")
+        .with_payer(_payer())
+        .with_accept_tos(True)
+        .with_device_info(_device(False))
+    )
+
+
+def test_mb_way_body() -> None:
+    body = _mb_way().to_api("MyShop")
+    assert body["phone_number"] == "+351912345678"
+    assert body["currency_code"] == "EUR"
+    assert body["channel"] == "373"
+    assert body["device_info"]["browserJavaEnabled"] == "false"
+
+
+def test_non_pln_amount_sends_its_currency() -> None:
+    body = RegisterPaymentRequest.create(
+        Money.of(49900, Currency.CZK), TransactionType.TRANSFERS, URLS
+    ).to_api("MyShop")
+    assert body["value"] == "499.00"
+    assert body["currency_code"] == "CZK"
+    assert list(body) == [
+        "service",
+        "value",
+        "transactionType",
+        "url_success",
+        "url_fail",
+        "url_ipn",
+        "currency_code",
+    ]
+
+
+def test_pln_amount_sends_no_currency_unless_asked_to() -> None:
+    plain = RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS).to_api("MyShop")
+    explicit = (
+        RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS)
+        .with_currency_code(Currency.PLN)
+        .to_api("MyShop")
+    )
+    assert "currency_code" not in plain
+    assert explicit["currency_code"] == "PLN"
+
+
+def test_currency_code_is_not_part_of_the_checksum(client: DPayClient, transport: MockHttpClient) -> None:
+    for amount in (Money.pln(1000), Money.of(1000, Currency.CZK)):
+        transport.queue_json(200, {"transactionId": "tx-1", "msg": "ok"})
+        client.payments.register(RegisterPaymentRequest.create(amount, TransactionType.TRANSFERS, URLS))
+    first, second = (json.loads(request.body or "{}") for request in transport.requests)
+    assert first["checksum"] == second["checksum"]
+
+
+def test_currency_code_must_match_the_amount() -> None:
+    request = RegisterPaymentRequest.create(Money.pln(500), TransactionType.TRANSFERS, URLS)
+    with pytest.raises(
+        DPayValueError,
+        match=r'^Currency code "EUR" does not match the amount currency "PLN" - create the amount with Money\.of\(\.\.\., "EUR"\)$',
+    ):
+        request.with_currency_code(Currency.EUR)
+    with pytest.raises(DPayValueError, match='Invalid currency code "eur"'):
+        request.with_currency_code("eur")
+
+
+def test_phone_number_currency_must_match_the_amount() -> None:
+    with pytest.raises(DPayValueError, match="does not match the amount currency"):
+        RegisterPaymentRequest.create(Money.pln(500), TransactionType.MB_WAY_DIRECT, URLS).with_phone_number(
+            "+351912345678", Currency.EUR
+        )
+
+
+@pytest.mark.parametrize("phone_number", ["+3519123", "+351912345678901"], ids=["8-chars", "16-chars"])
+def test_phone_number_length(phone_number: str) -> None:
+    request = RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+    with pytest.raises(DPayValueError, match=r"^Phone number must be 9-15 characters$"):
+        request.with_phone_number(phone_number, Currency.EUR)
+
+
+def test_phone_number_length_bounds_are_inclusive() -> None:
+    request = RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+    request.with_phone_number("1" * 9, Currency.EUR).with_phone_number("1" * 15, Currency.EUR)
+
+
+def test_new_currency_constants() -> None:
+    assert Currency.USD == "USD"
+    assert Currency.RON == "RON"
+    body = RegisterPaymentRequest.create(Money.of(100, Currency.RON), TransactionType.TRANSFERS, URLS).to_api(
+        "S"
+    )
+    assert body["currency_code"] == "RON"
+
+
+def test_mb_way_requires_a_channel() -> None:
+    request = (
+        RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+        .with_phone_number("+351912345678", Currency.EUR)
+        .with_payer(_payer())
+        .with_accept_tos(True)
+        .with_device_info(_device(True))
+    )
+    with pytest.raises(DPayValueError, match="requires a channel"):
+        request.to_api("MyShop")
+
+
+def test_mb_way_requires_browser_java_enabled() -> None:
+    with pytest.raises(DPayValueError, match="browserJavaEnabled"):
+        _mb_way().with_device_info(_device(None)).to_api("MyShop")
+
+
+def test_mb_way_requires_device_info() -> None:
+    request = (
+        RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+        .with_phone_number("+351912345678", Currency.EUR)
+        .with_channel("373")
+        .with_payer(_payer())
+        .with_accept_tos(True)
+    )
+    with pytest.raises(DPayValueError, match="browserJavaEnabled"):
+        request.to_api("MyShop")
+
+
+def test_channel_requires_payer_and_terms() -> None:
+    def base() -> RegisterPaymentRequest:
+        return RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS).with_channel(
+            "24900005"
+        )
+
+    with pytest.raises(DPayValueError, match="email, first name and last name"):
+        base().with_accept_tos(True).to_api("MyShop")
+    with pytest.raises(DPayValueError, match="first name"):
+        base().with_payer(Payer.create().with_email("client@example.com")).with_accept_tos(True).to_api(
+            "MyShop"
+        )
+    with pytest.raises(DPayValueError, match="first name"):
+        base().with_payer(
+            Payer.create().with_email("client@example.com").with_name("", "Silva")
+        ).with_accept_tos(True).to_api("MyShop")
+    with pytest.raises(DPayValueError, match="email"):
+        base().with_payer(Payer.create().with_name("Joao", "Silva")).with_accept_tos(True).to_api("MyShop")
+    with pytest.raises(DPayValueError, match="with_accept_tos"):
+        base().with_payer(_payer()).to_api("MyShop")
+
+
+def test_declined_terms_still_count_as_sent() -> None:
+    body = (
+        RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS)
+        .with_channel("24900005")
+        .with_payer(_payer())
+        .with_accept_tos(False)
+        .to_api("MyShop")
+    )
+    assert body["accept_tos"] is False
+
+
+@pytest.mark.parametrize("channel", ["tester", "paypal", "installment", "paysafecard"])
+def test_forbidden_direct_channels(channel: str) -> None:
+    request = RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS)
+    with pytest.raises(
+        DPayValueError, match=f'Channel "{channel}" cannot be used as a direct payment channel'
+    ):
+        request.with_channel(channel)
+
+
+def test_empty_channel_means_no_direct_channel() -> None:
+    # The API turns "" into null (ConvertEmptyStringsToNull), so it needs no payer or terms - sent as in 0.2.0
+    body = (
+        RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS)
+        .with_channel("")
+        .to_api("MyShop")
+    )
+    assert body["channel"] == ""
+
+    request = (
+        RegisterPaymentRequest.create(Money.of(500, Currency.EUR), TransactionType.MB_WAY_DIRECT, URLS)
+        .with_channel("")
+        .with_payer(_payer())
+        .with_accept_tos(True)
+        .with_device_info(_device(True))
+    )
+    with pytest.raises(DPayValueError, match="requires a channel"):
+        request.to_api("MyShop")
+
+
+def test_empty_channel_does_not_conflict_with_a_recurring_registration() -> None:
+    from dpay import RecurringRegistration
+
+    body = (
+        RegisterPaymentRequest.create(Money.pln(0), TransactionType.TRANSFERS, URLS)
+        .with_channel("")
+        .with_blik_code("777123", "UA", "1.2.3.4")
+        .with_recurring_registration(
+            RecurringRegistration.create(
+                "Abonament", RecurringRegistration.MODEL_O, "https://shop.example/terms"
+            )
+        )
+        .to_api("MyShop")
+    )
+    assert body["channel"] == ""
+
+
+def test_alias_ipn_url_is_at_most_500_characters() -> None:
+    url = "https://shop.example/" + "a" * 479
+    assert len(url) == 500
+    body = RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS).with_alias_ipn_url(
+        url
+    )
+    assert body.to_api("S")["alias_ipn_url"] == url
+    with pytest.raises(DPayValueError, match="Invalid alias IPN URL"):
+        RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS).with_alias_ipn_url(
+            url + "a"
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "configure"),
+    [
+        ("blik_code", lambda request: request.with_blik_code("777123", "UA", "1.2.3.4")),
+        ("blik_alias", lambda request: request.with_blik_alias("DPAY.UID.1.a", "UA", "1.2.3.4")),
+        ("register_blik_alias", lambda request: request.with_register_blik_alias(BlikAliasRegistration("a"))),
+        ("recurring_alias", lambda request: request.with_recurring_alias("SUB-0001")),
+        (
+            "register_card_recurring",
+            lambda request: request.with_card_recurring(CardRecurringRegistration.create("m")),
+        ),
+        ("card_recurring_alias", lambda request: request.with_card_recurring_alias("card-alias")),
+    ],
+)
+def test_efaktura_cannot_be_combined_with_aliases_or_recurring(
+    field: str, configure: Callable[[RegisterPaymentRequest], object]
+) -> None:
+    request = RegisterPaymentRequest.create(Money.pln(1000), TransactionType.TRANSFERS, URLS).with_efaktura()
+    configure(request)
+    with pytest.raises(DPayValueError, match=f"^efaktura cannot be combined with {field}$"):
+        request.to_api("MyShop")
+
+
+def test_payout_position_requires_a_valid_polish_iban() -> None:
+    spaced = PayoutPosition("pl61 1090 1014 0000 0712 1981 2874", "FV 1", Money.pln(100))
+    # Sent exactly as given - the API normalises it
+    assert spaced.to_api()["iban"] == "pl61 1090 1014 0000 0712 1981 2874"
+    assert PayoutPosition.is_valid_polish_iban("PL61109010140000071219812874")
+
+    for iban in ("PL61109010140000071219812875", "DE89370400440532013000", "61109010140000071219812874", ""):
+        assert not PayoutPosition.is_valid_polish_iban(iban)
+        with pytest.raises(DPayValueError, match="valid Polish IBAN"):
+            PayoutPosition(iban, "FV 1", Money.pln(100))
+
+
+def test_polish_iban_ignores_only_ascii_case_and_whitespace() -> None:
+    assert PayoutPosition.is_valid_polish_iban("\tpL61109010140000071219812874\n")
+    # Non-ASCII digits and spaces are not part of an IBAN
+    assert not PayoutPosition.is_valid_polish_iban("PL61109010140000071219812874".replace("6", "\u0666"))
+    assert not PayoutPosition.is_valid_polish_iban("PL61\u00a01090 1014 0000 0712 1981 2874")
+
+
+@pytest.mark.parametrize("minor", [0, -100])
+def test_payout_position_requires_a_positive_amount(minor: int) -> None:
+    with pytest.raises(DPayValueError, match=r"^Payout amount must be above 0$"):
+        PayoutPosition("PL61109010140000071219812874", "FV 1", Money.pln(minor))
+
+
+def test_labels_are_counted_in_characters() -> None:
+    assert BlikAliasRegistration("ż" * 35).label == "ż" * 35
+    with pytest.raises(DPayValueError, match=r"^Alias label must be 1-35 characters$"):
+        BlikAliasRegistration("")
+    # Card recurring labels keep the 50-character limit
+    CardRecurringRegistration.create("m" * 50)

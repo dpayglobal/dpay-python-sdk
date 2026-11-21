@@ -14,9 +14,12 @@ from dpay import (
     DPayValueError,
     InvalidRequestError,
     Money,
+    Payer,
     RecurringRegistration,
+    RecurringRetryResult,
     RecurringStatus,
     RegisterPaymentRequest,
+    RetryRefusal,
     ReturnUrls,
     TransactionType,
     WebhookTarget,
@@ -190,11 +193,12 @@ def test_terms_url_is_required_and_valid(terms_url: str) -> None:
 
 
 def test_label_model_and_alias_are_validated() -> None:
-    with pytest.raises(DPayValueError, match="Recurring payment label must be 1-50 characters"):
-        RecurringRegistration.create("x" * 51, RecurringRegistration.MODEL_O, TERMS)
+    with pytest.raises(DPayValueError, match="Recurring payment label must be 1-35 characters"):
+        RecurringRegistration.create("x" * 36, RecurringRegistration.MODEL_O, TERMS)
     with pytest.raises(DPayValueError, match='Invalid recurring model "Q"'):
         RecurringRegistration.create("Abonament", "Q", TERMS)
-    registration = RecurringRegistration.create("Ż" * 50, RecurringRegistration.MODEL_O, TERMS)
+    # 35 characters like PHP mb_strlen and the API max:35 - not bytes
+    registration = RecurringRegistration.create("Ż" * 35, RecurringRegistration.MODEL_O, TERMS)
     with pytest.raises(DPayValueError, match="Recurring alias must be 1-128 characters"):
         registration.with_alias("")
     # 128 bytes like PHP strlen - a two-byte character counts twice
@@ -409,6 +413,8 @@ def test_a_channel_does_not_block_a_recurring_charge() -> None:
     body = (
         RegisterPaymentRequest.create(Money.pln(4999), TransactionType.TRANSFERS, _urls())
         .with_channel("86")
+        .with_payer(Payer.create().with_email("jan@example.com").with_name("Jan", "Kowalski"))
+        .with_accept_tos(True)
         .with_recurring_alias("SUB-0001")
         .to_api("s")
     )
@@ -638,3 +644,31 @@ def test_status_checksum_matches_the_formula(client: DPayClient, transport: Mock
     client.recurring.status("a-1")
     expected = hashlib.sha256(f"{SERVICE}|{SECRET}|a-1".encode()).hexdigest()
     assert transport.last_request_body["checksum"] == expected
+
+
+def test_retry_result_success_and_refusal_codes() -> None:
+    result = RecurringRetryResult.from_api(
+        {"transactionId": "tx-1", "retry": {"status": "success", "count": 1}}
+    )
+    assert result.is_success
+    assert not result.is_pending
+    assert not result.is_failed
+    assert not RecurringRetryResult.from_api({"retry": {"status": "pending"}}).is_success
+    assert len(RetryRefusal.ALL) == 8
+    assert RetryRefusal.DECLINE_NOT_RETRYABLE == "DECLINE_NOT_RETRYABLE"
+    assert RetryRefusal.SERVICE_UNAVAILABLE == "Service unavailable"
+
+
+def test_retry_refusal_is_a_field_error(client: DPayClient, transport: MockHttpClient) -> None:
+    transport.queue_json(
+        400,
+        {
+            "status": "failed",
+            "message": "Retry refused",
+            "errors": {"retry": ["DECLINE_NOT_RETRYABLE"], "decline_reason": ["SEC_DECLINED"]},
+        },
+    )
+    with pytest.raises(InvalidRequestError) as error:
+        client.recurring.retry("tx-1")
+    assert error.value.field_errors["retry"] == [RetryRefusal.DECLINE_NOT_RETRYABLE]
+    assert error.value.field_errors["decline_reason"] == ["SEC_DECLINED"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -7,16 +8,35 @@ from dpay.exceptions import DPayValueError
 from dpay.money import Money
 from dpay.payment.enums import PayoutFeeMode
 
+_WHITESPACE = re.compile(r"\s", re.ASCII)
+_POLISH_IBAN = re.compile(r"PL[0-9]{26}")
+
 
 class PayoutPosition:
     def __init__(self, iban: str, title: str, amount: Money) -> None:
-        if iban == "":
-            raise DPayValueError("Payout IBAN must not be empty")
+        """``iban`` - Polish IBAN of one of your verified bank accounts (``PL`` + 26 digits, spaces allowed),
+        sent as given; ``amount`` above 0."""
+        if not PayoutPosition.is_valid_polish_iban(iban):
+            raise DPayValueError(f'Payout IBAN "{iban}" must be a valid Polish IBAN (PL + 26 digits)')
         if title == "" or len(title) > 255:
             raise DPayValueError("Payout title must be 1-255 characters")
+        if amount.minor <= 0:
+            raise DPayValueError("Payout amount must be above 0")
         self.iban = iban
         self.title = title
         self.amount = amount
+
+    @staticmethod
+    def is_valid_polish_iban(iban: str) -> bool:
+        """``PL`` + 26 digits after removing whitespace and upper-casing, with a valid ISO 13616 check
+        (mod 97 = 1)."""
+        normalized = _WHITESPACE.sub("", iban)
+        normalized = "".join(char.upper() if "a" <= char <= "z" else char for char in normalized)
+        if _POLISH_IBAN.fullmatch(normalized) is None:
+            return False
+        # Country code and check digits go to the end, letters become numbers (P = 25, L = 21)
+        numeric = normalized[4:] + "2521" + normalized[2:4]
+        return int(numeric) % 97 == 1
 
     def to_api(self) -> dict[str, Any]:
         return {

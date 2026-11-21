@@ -21,6 +21,12 @@ SECRET_SECOND: list[dict[str, Any]] = DATA["secret_second"]
 OPERATION: list[dict[str, Any]] = DATA["operation"]
 ORDERED_BODY: list[dict[str, Any]] = DATA["ordered_body"]
 WEBHOOK: dict[str, Any] = DATA["webhook"]
+# IPN payloads as dpay sends them (``signature`` included), signed with SECRET_HASH
+IPN: list[dict[str, Any]] = DATA["ipn"]
+# Strings and panel bodies trimmed the way the panel API trims them (Laravel 13 TrimStrings): input -> trimmed,
+# input -> body as sent -> ordered-body checksum
+SERVER_TRIM_STRINGS: list[dict[str, Any]] = DATA["server_trim"]["strings"]
+SERVER_TRIM_BODIES: list[dict[str, Any]] = DATA["server_trim"]["bodies"]
 
 
 def vector(section: list[dict[str, Any]], name: str) -> dict[str, Any]:

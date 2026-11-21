@@ -104,6 +104,7 @@ class ApplePayRequest:
         self.token = token
         self.device_info = device_info
         self.channel_id: int | None = None
+        self.email: str | None = None
 
     @classmethod
     def init(cls, device_info: DeviceInfo) -> ApplePayRequest:
@@ -113,12 +114,19 @@ class ApplePayRequest:
     def pay(cls, token: str, device_info: DeviceInfo) -> ApplePayRequest:
         return cls("APPLE_PAY", token, device_info)
 
+    def with_email(self, email: str) -> ApplePayRequest:
+        """Payer's email (sent with the APPLE_PAY call, like for Google Pay)."""
+        self.email = email
+        return self
+
     def with_channel_id(self, channel_id: int) -> ApplePayRequest:
         self.channel_id = channel_id
         return self
 
     def to_api(self) -> dict[str, Any]:
         body: dict[str, Any] = {}
+        if self.email is not None:
+            body["email"] = self.email
         if self.channel_id is not None:
             body["channelId"] = self.channel_id
         body["xPayType"] = self.x_pay_type

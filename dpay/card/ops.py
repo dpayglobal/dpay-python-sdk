@@ -14,13 +14,16 @@ from dpay.money import Money
 from dpay.webhook.event_type import WebhookEventType
 from dpay.webhook.target import WebhookTarget
 
+# Characters PHP trim() removes (``str.strip()`` also removes Unicode spaces and U+001C-U+001F)
+_TRIMMED = " \t\n\r\x00\x0b"
+
 
 def public_key() -> Operation:
     return Operation(
         "GET",
         base_urls.API_PAYMENTS,
         "/api/v1_0/cards/public-key",
-        lambda response: response.body.strip(),
+        lambda response: response.body.strip(_TRIMMED),
     )
 
 

@@ -56,6 +56,15 @@ def test_every_model_group_is_covered() -> None:
         "recurring_status",
         "recurring_retry",
         "webhook_event",
+        "registered_v3",
+        "transaction_v3",
+        "payout_v3",
+        "payout_page",
+        "payout_settlement",
+        "webhook_object",
+        "alias_update",
+        "card_error",
+        "merchant_session",
     }
 
 
